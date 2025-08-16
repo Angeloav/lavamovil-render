@@ -1,10 +1,11 @@
-import os
+import os 
 IS_WINDOWS = os.name == "nt"
 
 # Usa eventlet solo cuando NO sea Windows (ej. Render)
 if not IS_WINDOWS:
     import eventlet
     eventlet.monkey_patch()
+
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, emit, join_room
@@ -22,13 +23,11 @@ app.config['UPLOAD_FOLDER'] = 'static/bauches'
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['SESSION_FILE_DIR'] = os.path.join(os.getcwd(), 'flask_session')
 
-
 db = SQLAlchemy(app)
 Session(app)
 
 ASYNC_MODE = "eventlet" if not IS_WINDOWS else "threading"
-socketio = SocketIO(app, async_mode="eventlet", cors_allowed_origins="*", logger=True, engineio_logger=True)
-                    logger=True, engineio_logger=True)
+socketio = SocketIO(app, async_mode=ASYNC_MODE, cors_allowed_origins="*", logger=True, engineio_logger=True)
 
 # Modelos
 class Usuario(db.Model):
