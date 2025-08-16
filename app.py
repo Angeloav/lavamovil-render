@@ -1,3 +1,10 @@
+import os
+IS_WINDOWS = os.name == "nt"
+
+# Usa eventlet solo cuando NO sea Windows (ej. Render)
+if not IS_WINDOWS:
+    import eventlet
+    eventlet.monkey_patch()
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, emit, join_room
@@ -6,6 +13,17 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, curren
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
 import os
+
+from flask_socketio import SocketIO
+ASYNC_MODE = "eventlet" if not IS_WINDOWS else "threading"
+
+socketio = SocketIO(
+    app,
+    async_mode=ASYNC_MODE,
+    cors_allowed_origins="*",
+    logger=True,
+    engineio_logger=True,
+)
 
 # Configuración inicial de la app
 app = Flask(__name__)
@@ -1047,9 +1065,6 @@ def _versions():
     }), 200
 # 🔧 FIN PARCHE
 
-if __name__ == '__main__':
-    with app.app_context():
-        if not os.path.exists('lavamovil.db'):
-            db.create_all()
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
-
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    socketio.run(app, host="0.0.0.0", port=port, debug=IS_WINDOWS)
