@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <title>Panel de Trabajo del Lavador - LavaMovilFinal</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            border: none;
+            background-color: #28a745;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #218838;
+        }
+        #map {
+            width: 100%;
+            height: 400px;
+            margin-bottom: 20px;
+        }
+        #notificacion {
+            display: none;
+            background-color: #ffc107;
+            padding: 10px;
+            border-radius: 5px;
+            color: #333;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Estás en tu Panel de Trabajo 🚚</h1>
+
+    <div id="notificacion"></div>
+    <audio id="audioNotificacion" src="/static/sounds/soundalerta.mp3" preload="auto"></audio>
+
+    <div id="map"></div>
+
+    <button onclick="volverAlInicio()">Volver al inicio</button>
+    <button onclick="cerrarSesion()">Cerrar Sesión</button>
+
+    <script src="https://cdn.socket.io/4.4.1/socket.io.min.js"></script>
+    <script>
+        let map;
+        let markerLavador = null;
+        const socket = io();
+        const audioNotificacion = document.getElementById('audioNotificacion');
+
+        socket.on('nueva_solicitud', function(data) {
+            const notificacion = document.getElementById('notificacion');
+            notificacion.textContent = data.mensaje;
+            notificacion.style.display = 'block';
+            audioNotificacion.play();
+
+            setTimeout(() => {
+                notificacion.style.display = 'none';
+            }, 5000);
+        });
+
+        function volverAlInicio() {
+            window.location.href = "/";
+        }
+
+        function cerrarSesion() {
+            window.location.href = "/logout";
+        }
+
+        function initMap() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(function(position) {
+                    const ubicacionLavador = {
+                        lat: position.coords.latitude,
+                        lng: position.coords.longitude
+                    };
+
+                    map = new google.maps.Map(document.getElementById('map'), {
+                        center: ubicacionLavador,
+                        zoom: 15
+                    });
+
+                    markerLavador = new google.maps.Marker({
+                        position: ubicacionLavador,
+                        map: map,
+                        title: "Tu ubicación",
+                        icon: {
+                            url: "/static/icons/camioncito_icono.png",
+                            scaledSize: new google.maps.Size(50, 50)
+                        }
+                    });
+
+                    actualizarUbicacion(ubicacionLavador.lat, ubicacionLavador.lng);
+                    setInterval(() => {
+                        navigator.geolocation.getCurrentPosition(pos => {
+                            const nuevaUbicacion = {
+                                lat: pos.coords.latitude,
+                                lng: pos.coords.longitude
+                            };
+                            markerLavador.setPosition(nuevaUbicacion);
+                            map.setCenter(nuevaUbicacion);
+                            actualizarUbicacion(nuevaUbicacion.lat, nuevaUbicacion.lng);
+                        });
+                    }, 5000);
+                });
+            } else {
+                alert("La geolocalización no está disponible.");
+            }
+        }
+
+        function actualizarUbicacion(lat, lng) {
+            fetch('/actualizar_ubicacion', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({latitud: lat, longitud: lng})
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            initMap();
+        });
+    </script>
+
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBmVCNKb_sjx-vE5b1YoJpPUgm8Ub09ElE&callback=initMap" async defer></script>
+</body>
+</html>

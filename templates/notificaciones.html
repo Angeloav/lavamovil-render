@@ -1,0 +1,22 @@
+<!-- Notificación Global Reutilizable -->
+<div id="notificacion-global" style="display:none; background:#ffc107; padding:15px; border-radius:8px; margin:20px; max-width:600px; margin-left:auto; margin-right:auto; font-weight:bold; color:#333;">
+  <strong id="noti-titulo"></strong><br>
+  <span id="noti-mensaje"></span>
+</div>
+
+<audio id="sonidoNoti" src="/static/sounds/soundalerta.mp3" preload="auto"></audio>
+
+<script>
+function mostrarNotificacion(titulo, mensaje) {
+    const caja = document.getElementById('notificacion-global');
+    const sonido = document.getElementById('sonidoNoti');
+    document.getElementById('noti-titulo').innerText = titulo;
+    document.getElementById('noti-mensaje').innerText = mensaje;
+    caja.style.display = 'block';
+    sonido.play();
+
+    setTimeout(() => {
+        caja.style.display = 'none';
+    }, 6000);
+}
+</script>

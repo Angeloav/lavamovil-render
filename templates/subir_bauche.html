@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Subir Comprobante de Pago - LavaMovil</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f9;
+            text-align: center;
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        form {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            display: inline-block;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        input[type="file"] {
+            margin: 15px 0;
+        }
+        input[type="submit"] {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        input[type="submit"]:hover {
+            background-color: #0056b3;
+        }
+        .info {
+            background: #fff3cd;
+            color: #856404;
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <h1>Sube tu Comprobante de Pago</h1>
+
+    <div class="info">
+        <p><strong>Banco:</strong> Banco Ademi</p>
+        <p><strong>Cuenta:</strong> 20050919566947</p>
+        <p><strong>Nombre:</strong> Angelo A Abreu</p>
+    </div>
+
+    <form action="/subir_bauche" method="post" enctype="multipart/form-data">
+        <label for="bauche">Selecciona el comprobante de pago:</label><br>
+        <input type="file" name="bauche" id="bauche" required><br>
+        <input type="submit" value="Enviar Comprobante">
+    </form>
+<!-- 🔧 INICIO PARCHE: fetch /datos_lavador -->
+<script>
+(async () => {
+  try {
+    const r = await fetch("/datos_lavador", { credentials: "include" });
+    if (!r.ok) { console.warn("HTTP", r.status); return; }
+    const j = await r.json();
+    if (!j.ok) { console.warn("API", j.error); return; }
+    console.log("✅ lavador:", j.lavador);
+    // si quieres mostrarlo en la página, crea un <div id="lavInfo"></div> y pinta aquí
+  } catch (e) {
+    console.warn("fetch /datos_lavador falló:", e);
+  }
+})();
+</script>
+<!-- 🔧 FIN PARCHE -->
+
+</body>
+</html>

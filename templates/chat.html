@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ titulo_chat }}</title>
+  <script src="https://cdn.socket.io/4.3.2/socket.io.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+      background-color: #f5f5f5;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    #header {
+      background-color: #6c63ff;
+      color: white;
+      text-align: center;
+      padding: 15px;
+      font-size: 18px;
+      font-weight: bold;
+    }
+    #mensajes {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      background-color: white;
+    }
+    .mensaje {
+      max-width: 75%;
+      margin-bottom: 10px;
+      padding: 10px 15px;
+      border-radius: 20px;
+      clear: both;
+      word-wrap: break-word;
+    }
+    .mensaje-yo {
+      background-color: #6c63ff;
+      color: white;
+      float: right;
+      border-bottom-right-radius: 5px;
+    }
+    .mensaje-otro {
+      background-color: #e0e0e0;
+      float: left;
+      border-bottom-left-radius: 5px;
+    }
+    #formChat {
+      display: flex;
+      padding: 10px;
+      border-top: 1px solid #ccc;
+      background-color: #fafafa;
+    }
+    #mensaje {
+      flex: 1;
+      padding: 10px;
+      font-size: 16px;
+      border-radius: 20px;
+      border: 1px solid #ccc;
+    }
+    #formChat button {
+      margin-left: 10px;
+      background-color: #6c63ff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 20px;
+      font-weight: bold;
+    }
+    #volver {
+      margin: 10px;
+      padding: 10px;
+      border: none;
+      background-color: #ff5c5c;
+      color: white;
+      border-radius: 10px;
+      font-weight: bold;
+      width: calc(100% - 20px);
+    }
+  </style>
+</head>
+<body>
+<div style="background-color:#f0f0f0; padding:10px; font-size:14px; color:#333; text-align:center;">
+  🧠 <strong>Debug Chat:</strong>
+  Usuario ID: <strong>{{ cliente.id if rol == 'cliente' else lavador.id }}</strong> |
+  Rol: <strong>{{ rol }}</strong> |
+  Sala: <strong>{{ sala }}</strong>
+</div>
+
+  <div id="header">{{ titulo_chat }}</div>
+  
+  {% if not cliente or not lavador %}
+  <div style="background-color:#ffdddd; color:#900; padding:10px; text-align:center;">
+    ❌ No tienes una solicitud aceptada activa entre estos usuarios.
+  </div>
+{% endif %}
+
+  <div id="mensajes"></div>
+
+  <form id="formChat">
+    <input type="text" id="mensaje" placeholder="Escribe tu mensaje..." autocomplete="off">
+    <button type="submit">Enviar</button>
+  </form>
+
+  {% if rol == 'cliente' %}
+    <form action="/cliente_dashboard">
+      <button id="volver">Volver al Panel</button>
+    </form>
+  {% elif rol == 'lavador' %}
+    <form action="/lavador_dashboard">
+      <button id="volver">Volver al Panel</button>
+    </form>
+  {% endif %}
+
+  <script>
+  const socket = io();
+  const clienteId = {{ cliente.id }};
+  const lavadorId = {{ lavador.id }};
+  const usuarioId = {{ cliente.id if rol == 'cliente' else lavador.id }};
+  const clienteNombre = "{{ cliente.nombre }}";
+  const lavadorNombre = "{{ lavador.nombre }}";
+  const nombreUsuario = "{{ cliente.nombre if rol == 'cliente' else lavador.nombre }}";
+
+  socket.emit("unirse_sala_privada", {
+    cliente_id: clienteId,
+    lavador_id: lavadorId
+  });
+
+  socket.emit("unirse_sala_mensajes", {
+    user_id: usuarioId
+  });
+
+  const divMensajes = document.getElementById("mensajes");
+
+  // 🔄 Cargar historial de mensajes al abrir el chat
+  fetch(`/mensajes_chat/${clienteId}/${lavadorId}`)
+    .then(response => response.json())
+    .then(mensajes => {
+      mensajes.forEach(m => {
+        const autor = m.autor_id === clienteId ? clienteNombre : lavadorNombre;
+        const div = document.createElement("div");
+        div.className = m.autor_id === usuarioId ? "mio" : "otro";
+        div.textContent = `${autor}: ${m.mensaje}`;
+        document.getElementById("mensajes").appendChild(div);
+      });
+
+    // ⬇️ Bajar scroll al final automáticamente
+    const mensajesDiv = document.getElementById("mensajes");
+    mensajesDiv.scrollTop = mensajesDiv.scrollHeight;
+  });
+
+  function agregarMensaje(mensaje, esPropio, autorId = null) {
+    const div = document.createElement("div");
+    div.classList.add("mensaje");
+    div.classList.add(esPropio ? "mensaje-yo" : "mensaje-otro");
+
+    let autorNombre = nombreUsuario;
+    if (!esPropio && autorId) {
+      autorNombre = autorId === clienteId ? clienteNombre : lavadorNombre;
+    }
+
+    div.textContent = `${autorNombre}: ${mensaje}`;
+    divMensajes.appendChild(div);
+    divMensajes.scrollTop = divMensajes.scrollHeight;
+  }
+
+  document.getElementById("formChat").addEventListener("submit", function(e) {
+    e.preventDefault();
+    const input = document.getElementById("mensaje");
+    const mensaje = input.value.trim();
+    if (mensaje !== "") {
+      socket.emit("enviar_mensaje_privado", {
+        cliente_id: clienteId,
+        lavador_id: lavadorId,
+        autor_id: usuarioId,
+        mensaje: mensaje
+      });
+      agregarMensaje(mensaje, true);
+      input.value = "";
+    }
+  });
+
+  socket.on("recibir_mensaje_privado", function(data) {
+    if (data.autor_id !== usuarioId) {
+      agregarMensaje(data.mensaje, false, data.autor_id);
+    }
+  });
+</script>
+</body>
+</html>

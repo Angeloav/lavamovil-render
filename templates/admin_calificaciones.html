@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Calificaciones de Clientes - Admin</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #f4f8fb;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 {
+      color: #2c3e50;
+      display: flex;
+      align-items: center;
+    }
+    h1 img {
+      width: 30px;
+      margin-right: 10px;
+    }
+    .filtros {
+      margin: 20px 0;
+      display: flex;
+      gap: 10px;
+    }
+    .filtros input, .filtros select {
+      padding: 10px;
+      font-size: 14px;
+      border-radius: 5px;
+      border: 1px solid #ccc;
+    }
+    .tabla-calificaciones {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .tabla-calificaciones th, .tabla-calificaciones td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+    }
+    .tabla-calificaciones th {
+      background-color: #007bff;
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <h1><img src="/static/icons/grafico.png" onerror="this.style.display='none'"> Calificaciones de Clientes</h1>
+
+  <div class="filtros">
+    <input type="text" id="filtroNombre" placeholder="Filtrar por nombre..." onkeyup="filtrar()">
+    <select id="filtroTipo" onchange="filtrar()">
+      <option value="Todas">Todas</option>
+      <option value="Excelente">Excelente</option>
+      <option value="Bueno">Bueno</option>
+      <option value="Regular">Regular</option>
+      <option value="Malo">Malo</option>
+    </select>
+  </div>
+
+  <table class="tabla-calificaciones" id="tablaCalificaciones">
+    <thead>
+      <tr>
+        <th>Cliente</th>
+        <th>Lavador</th>
+        <th>Calificación</th>
+        <th>Comentario</th>
+        <th>Fecha</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for cal in calificaciones %}
+      <tr>
+        <td>{{ cal.cliente_nombre }}</td>
+        <td>{{ cal.lavador_nombre }}</td>
+        <td>{{ cal.calificacion }}</td>
+        <td>{{ cal.comentario }}</td>
+        <td>
+          {% if cal.timestamp %}
+            {{ cal.timestamp.strftime('%Y-%m-%d %H:%M') }}
+          {% else %}
+            Sin fecha
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <script>
+    function filtrar() {
+      const input = document.getElementById("filtroNombre").value.toLowerCase();
+      const tipo = document.getElementById("filtroTipo").value;
+      const filas = document.querySelectorAll("#tablaCalificaciones tbody tr");
+
+      filas.forEach(fila => {
+        const nombre = fila.children[0].textContent.toLowerCase();
+        const calificacion = fila.children[2].textContent;
+
+        const coincideNombre = nombre.includes(input);
+        const coincideTipo = (tipo === "Todas" || calificacion === tipo);
+
+        fila.style.display = (coincideNombre && coincideTipo) ? "" : "none";
+      });
+    }
+  </script>
+</body>
+</html>

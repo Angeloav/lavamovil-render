@@ -1,0 +1,86 @@
+<!DOCTYPE html>  
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Panel de Administración - LavaMovil</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: #f4f8fb;
+            text-align: center;
+            padding: 20px;
+            margin: 0;
+        }
+
+        h1 {
+            color: #2c3e50;
+            margin-top: 10px;
+        }
+
+        .boton {
+            padding: 14px 25px;
+            margin: 12px 8px;
+            border-radius: 30px;
+            border: none;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 90%;
+            max-width: 320px;
+        }
+
+        .bauches { background-color: #17a2b8; }
+        .bauches:hover { background-color: #11707d; }
+
+        .lavadores { background-color: #28a745; }
+        .lavadores:hover { background-color: #1c7c31; }
+
+        .solicitudes { background-color: #ffc107; color: #333; }
+        .solicitudes:hover { background-color: #d4a307; color: #fff; }
+
+        .cerrar {
+            background-color: #dc3545;
+            padding: 14px 25px;
+            border: none;
+            border-radius: 30px;
+            font-size: 16px;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .cerrar:hover {
+            background-color: #a71d2a;
+        }
+
+        .boton-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            margin-top: 20px;
+            margin-bottom: 30px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Panel de Administración</h1>
+
+    <div class="boton-container">
+        <button class="boton bauches" onclick="window.location.href='/admin_bauches'">📄 Ver Comprobantes de Pago</button>
+        <button class="boton lavadores" onclick="window.location.href='/admin_lavadores'">🧽 Ver Lavadores Activos</button>
+        <button class="boton solicitudes" onclick="window.location.href='/admin_solicitudes'">📋 Ver Solicitudes Activas</button>
+        <button class="cerrar" onclick="window.location.href='/admin_logout'">🔒 Cerrar Sesión</button>
+    </div>
+
+    <form action="/admin_calificaciones" method="get">
+        <button style="margin: 10px; background-color: #007bff; color: white; padding: 12px; border-radius: 8px; border: none; font-size: 16px;">
+            📊 Ver Calificaciones
+        </button>
+    </form>
+
+</body>
+</html>

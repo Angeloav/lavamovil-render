@@ -1,0 +1,115 @@
+<!DOCTYPE html>  
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Pago de Suscripción - LavaMovilFinal</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f2f5;
+            text-align: center;
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        p {
+            font-size: 16px;
+        }
+        .contenedor {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            display: inline-block;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        input[type="file"] {
+            margin-top: 15px;
+        }
+        button {
+            margin-top: 10px;
+            padding: 10px 20px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        .info-banco {
+            background-color: #e0f7fa;
+            border: 1px solid #b2ebf2;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            color: #00796b;
+        }
+        #nombre-archivo {
+            margin-top: 10px;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="contenedor">
+        <h1>Realiza tu pago de suscripción</h1>
+
+        <div class="info-banco">
+            <p><strong>Banco:</strong> Banco Ademi</p>
+            <p><strong>Cuenta:</strong> 20050919566947</p>
+            <p><strong>Tipo de Cuenta:</strong> Ahorros</p>
+            <p><strong>Nombre del titular:</strong> Angelo</p>
+        </div>
+
+        <form action="/subir_bauche" method="post" enctype="multipart/form-data">
+            <label for="bauche">Sube tu comprobante de pago:</label><br>
+            <input type="file" name="bauche" id="bauche" accept="image/*" capture="environment" required onchange="mostrarNombre(this)"><br>
+            <label id="nombre-archivo"></label><br>
+            <button type="submit">Enviar Comprobante</button>
+        </form>
+
+        <button onclick="volverAlInicio()">Volver al inicio</button>
+    </div>
+
+    <!-- ✅ Socket.io y lógica de notificación en tiempo real -->
+    <script src="https://cdn.socket.io/4.4.1/socket.io.min.js"></script>
+<script>
+    function volverAlInicio() {
+        window.location.href = "/";
+    }
+
+    const socket = io();
+    const audioNotificacion = new Audio('/static/sounds/soundalerta.mp3');
+
+    document.addEventListener('DOMContentLoaded', function() {
+        fetch('/datos_lavador')
+            .then(response => response.json())
+            .then(lavador => {
+                if (lavador && lavador.suscrito) {
+                    audioNotificacion.play();
+                    alert('¡Tu bauche ya ha sido aprobado! Te llevamos al panel de trabajo.');
+                    window.location.href = '/lavador_dashboard';
+                }
+            });
+    });
+
+    socket.on('bauche_aprobado', function(data) {
+        const LAVADOR_ID = {{ lavador.id }};
+        if (data.lavador_id == LAVADOR_ID) {
+            audioNotificacion.play();
+            alert('¡Tu bauche ha sido aprobado! Te llevamos al panel de trabajo.');
+            window.location.href = '/lavador_dashboard';
+        }
+    });
+
+    
+    function mostrarNombre(input) {
+        if (input.files && input.files[0]) {
+            document.getElementById("nombre-archivo").innerText = "Archivo seleccionado: " + input.files[0].name;
+        }
+    }
+</script>
+</body>
+</html>

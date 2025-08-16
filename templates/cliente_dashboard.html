@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- Ícono de pestaña (favicon) -->
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+  
+  <title>Cliente - LavaMovil</title>
+  <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBmVCNKb_sjx-vE5b1YoJpPUgm8Ub09ElE&callback=initMap"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #121212;
+      color: #ffffff;
+      margin: 0; padding: 0;
+      text-align: center;
+    }
+    .notificacion {
+      background-color: #d1f0f8;
+      color: #000;
+      padding: 15px;
+      font-size: 14px;
+      text-align: left;
+      border-radius: 0 0 15px 15px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .notificacion strong {
+      color: #c0392b;
+      display: block;
+    }
+    h1 {
+      font-size: 24px;
+      color: #ffffff;
+      margin-top: 20px;
+    }
+    p {
+      color: #ffffff;
+      font-size: 14px;
+      margin-bottom: 20px;
+    }
+    h3 {
+      color: #ffffff;
+    }
+    #map {
+      height: 250px;
+      width: 90%;
+      max-width: 360px;
+      margin: 0 auto 20px;
+      border-radius: 20px;
+      border: 1px solid #333;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+    }
+    button {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 85%;
+      max-width: 320px;
+      margin: 10px auto;
+      padding: 14px;
+      border: 2px solid #aaa;
+      border-radius: 30px;
+      font-size: 16px;
+      font-weight: 600;
+      color: white;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-sizing: border-box;
+    }
+    .solicitar { background-color: #007bff; }
+    .cancelar  { background-color: #dc3545; }
+    .finalizar { background-color: #28a745; }
+    .cerrar    { background-color: #616161; }
+    .solicitar:hover  { background-color: #0056b3; }
+    .cancelar:hover   { background-color: #a71d2a; }
+    .finalizar:hover  { background-color: #1c7c31; }
+    .cerrar:hover     { background-color: #1d2124; }
+    #formularioCalificacion, .calificacion-box {
+      width: 85%;
+      max-width: 320px;
+      margin: 20px auto;
+      box-sizing: border-box;
+    }
+    select, textarea {
+      width: 100%;
+      max-width: 100%;
+      padding: 12px;
+      margin-top: 10px;
+      border-radius: 8px;
+      border: 1px solid #555;
+      font-size: 14px;
+      background-color: #2a2a2a;
+      color: #ffffff;
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+<body style="margin:0; padding:0; overflow-x:hidden; background-color:#1e1e2f; color:white;">
+
+  {% include 'notificaciones.html' %}
+  <div id="mensajeLavador" class="notificacion" style="display: none;">
+    <strong>Lavador en camino</strong>
+    El lavador ha aceptado tu solicitud y va en camino
+  </div>
+
+  <h1>Bienvenido {{ cliente.nombre }} {{ cliente.apellido }}</h1>
+  <p>ID de Usuario: {{ cliente.id }}</p>
+  <div id="map"></div>
+
+  <button class="solicitar"   onclick="guardarUbicacionYEnviar()">🚗 Solicitar Servicio</button>
+  <button class="cancelar"    onclick="cancelarSolicitud()">🗑 Cancelar Solicitud</button>
+  <button class="finalizar"   onclick="mostrarFormularioCalificacion()">⭐ Finalizar Servicio / Calificar</button>
+  <button class="cerrar"      onclick="cerrarSesion()">➡️ Cerrar Sesión</button>
+
+  <form action="/chat" method="get">
+    <input type="hidden" name="rol" value="cliente">
+    <button id="botonChat" type="submit" style="background-color: #6c63ff; color: white; padding: 10px; border-radius: 10px;">
+      💬 Chat con Lavador
+    </button>
+  </form>
+
+  <div id="formularioCalificacion" style="display: none;">
+    <h3>Califica el servicio</h3>
+    <select id="calificacion">
+      <option value="Excelente">Excelente</option>
+      <option value="Bueno">Bueno</option>
+      <option value="Regular">Regular</option>
+      <option value="Malo">Malo</option>
+    </select>
+    <textarea id="comentario" placeholder="Comentario (opcional)"></textarea>
+    <button class="finalizar" onclick="enviarCalificacion()">Enviar Calificación</button>
+  </div>
+
+  <audio id="sonidoMensaje" src="/static/sounds/nuevo_mensaje.mp3"></audio>
+
+  <!-- ==================== SCRIPT PRINCIPAL ==================== -->
+  <script>
+    const socket         = io();
+    const clienteId      = {{ cliente.id }};
+    const lavadorId      = {{ solicitud_activa.lavador_id if solicitud_activa else 'null' }};
+    const tieneSolicitud = {{ 'true' if solicitud_activa else 'false' }};
+
+    let map, lavadorMarker, clienteMarker, rutaPolyline;
+    let ubicacionInicialGuardada = false;
+    let solicitudAceptada = tieneSolicitud; // ← AQUÍ: inicializamos con base en la data del servidor
+
+    // Avisar al cliente visualmente si ya había una solicitud aceptada antes de recargar
+    if (solicitudAceptada) {
+      document.getElementById("mensajeLavador").style.display = "block";
+    }
+
+    // Cuando el lavador acepta, el server envía este mensaje
+    socket.on("notificacion_cliente", (data) => {
+      if (data.cliente_id === clienteId && data.mensaje) {
+        document.getElementById("mensajeLavador").style.display = "block";
+        solicitudAceptada = true;
+      }
+    });
+
+    // Unirse a la sala privada para recibir "iniciar_movimiento"
+    if (lavadorId !== null) {
+      socket.emit("unirse_sala_privada", {
+        cliente_id: clienteId,
+        lavador_id: lavadorId
+      });
+    }
+
+    socket.on("iniciar_movimiento", (data) => {
+      if (data.cliente_id === clienteId && data.lavador_id === lavadorId) {
+        solicitudAceptada = true;
+      }
+    });
+
+    function initMap() {
+      map = new google.maps.Map(document.getElementById('map'), {
+        center: { lat: 19.4326, lng: -99.1332 },
+        zoom: 15
+      });
+
+      // Colocar marcador inicial del cliente
+      navigator.geolocation.getCurrentPosition(position => {
+        const clientePos = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        };
+        map.setCenter(clientePos);
+        clienteMarker = new google.maps.Marker({
+          position: clientePos,
+          map: map,
+          title: "Tu ubicación",
+          icon: {
+            url: "/static/icons/carrito_icono.png",
+            scaledSize: new google.maps.Size(50, 50)
+          }
+        });
+
+        if (!ubicacionInicialGuardada) {
+          guardarUbicacionAlCargar(clientePos.lat, clientePos.lng);
+          ubicacionInicialGuardada = true;
+        }
+
+      }, error => {
+        // Si falla geolocalización, usar coordenadas fijas
+        const clientePos = { lat: 43.0961502, lng: -75.2103744 };
+        map.setCenter(clientePos);
+        clienteMarker = new google.maps.Marker({
+          position: clientePos,
+          map: map,
+          title: "Ubicación estimada",
+          icon: {
+            url: "/static/icons/carrito_icono.png",
+            scaledSize: new google.maps.Size(50, 50)
+          }
+        });
+        if (!ubicacionInicialGuardada) {
+          guardarUbicacionAlCargar(clientePos.lat, clientePos.lng);
+          ubicacionInicialGuardada = true;
+        }
+      }, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      });
+
+      // Cada 5s, si la solicitud fue aceptada, consultamos ubicación del lavador
+      setInterval(() => {
+        if (solicitudAceptada) {
+          obtenerUbicacionLavador();
+        }
+      }, 5000);
+    }
+
+    window.initMap = initMap; // 👉 Esto hace visible la función para Google Maps
+
+    // Y si quieres que el carrito se mueva desde el inicio:
+    if (solicitudAceptada) {
+    iniciarMovimientoCarritoCamioncito();
+    }
+
+    function iniciarMovimientoCarritoCamioncito() {
+      // Llamada inmediata para no esperar 5 segundos
+      obtenerUbicacionLavador();
+    }
+
+    function obtenerUbicacionLavador() {
+      if (!lavadorId || lavadorId === "none") return;
+
+      fetch(`/obtener_ubicacion_lavador?user_id=${lavadorId}`, {
+        credentials: 'include'
+      })
+      .then(response => response.json())
+      .then(data => {
+        console.log("📡 Datos recibidos del lavador:", data);  // 🔍 Registro agregado
+
+        if (data.lat && data.lng) {
+          const lavadorPos = { lat: data.lat, lng: data.lng };
+          if (!lavadorMarker) {
+            lavadorMarker = new google.maps.Marker({
+              position: lavadorPos,
+              map: map,
+              title: "Lavador en camino",
+              icon: {
+                url: "/static/icons/camioncito_icono.png",
+                scaledSize: new google.maps.Size(50, 50)
+              }
+            });
+          } else {
+            lavadorMarker.setPosition(lavadorPos);
+          }
+          if (clienteMarker && lavadorMarker) {
+            if (rutaPolyline) rutaPolyline.setMap(null);
+            rutaPolyline = new google.maps.Polyline({
+              path: [lavadorPos, clienteMarker.getPosition()],
+              geodesic: true,
+              strokeColor: "#00ff00",
+              strokeOpacity: 0.8,
+              strokeWeight: 4
+            });
+            rutaPolyline.setMap(map);
+          }
+        }
+      })
+      .catch(err => console.warn("⚠️ Error en obtenerUbicacionLavador():", err));
+    }
+
+    // ==================== FUNCIONES EXISTENTES (sin modificar) ====================
+    function guardarUbicacionYEnviar() {
+      navigator.geolocation.getCurrentPosition(pos => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+
+        latitudCliente = lat;
+        longitudCliente = lng;
+
+        fetch('/actualizar_ubicacion_cliente', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ latitud: lat, longitud: lng })
+        })
+        .then(res => {
+          if (!res.ok) console.error("❌ /actualizar_ubicacion_cliente devolvió:", res.status);
+          return res.json();
+        })
+        .then(data => {
+          solicitarServicio();  // Llamamos a la función que hace el emit y guarda el ID
+        })
+        .catch(err => {
+          console.error("❌ Error en guardarUbicacionYEnviar():", err);
+          alert("Error al actualizar la ubicación.");
+        });
+      }, err => {
+        console.error("❌ Error en geolocalización:", err);
+        alert("No se pudo obtener tu ubicación.");
+      });
+    }
+
+    function solicitarServicio(latitudCliente, longitudCliente) {
+      fetch("/solicitar_servicio", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" }
+      })
+      .then(response => {
+        if (!response.ok) throw new Error("Respuesta no OK del servidor");
+        return response.json();
+      })
+      .then(data => {
+        if (data.success) {
+          alert("🚗 Solicitud enviada correctamente.");
+          console.log("📡 Solicitud creada y enviada al lavador (vía servidor). ID:", data.solicitud_id);
+        } else {
+          alert("❌ No se pudo enviar la solicitud: " + (data.error || "Error desconocido."));
+        }
+      })
+      .catch(err => {
+        console.error("❌ Error en solicitarServicio():", err);
+        alert("❌ Ocurrió un error inesperado.");
+      });
+    }
+
+    function cancelarSolicitud() {
+      fetch("/cancelar_solicitud", {
+        method: "POST",
+        credentials: "include"
+     })
+     .then(res => res.json())
+     .then(data => {
+       if (data.redirect) {
+         window.location.href = data.redirect;  // ⬅ redirige a /solicitud_cancelada
+       } else {
+         alert(data.message || "🛑 Solicitud cancelada.");
+         location.reload(); // Solo si no hay redirección
+       }
+    })
+    .catch(err => {
+      console.error("❌ Error en cancelarSolicitud():", err);
+      alert("❌ Error al cancelar la solicitud.");
+    });
+  }
+
+    function mostrarFormularioCalificacion() {
+      document.getElementById("formularioCalificacion").style.display = "block";
+    }
+
+    function enviarCalificacion() {
+      const calificacion = document.getElementById("calificacion").value;
+      const comentario  = document.getElementById("comentario").value;
+      fetch("/finalizar_servicio", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ calificacion: calificacion, comentario: comentario })
+      })
+      .then(res => {
+        if (!res.ok) console.error("❌ /finalizar_servicio devolvió código:", res.status);
+        return res.json();
+      })
+      .then(data => {
+        alert(data.mensaje);
+        if (data.mensaje.includes("calificado")) {
+          window.location.href = "/cliente_dashboard";
+        }
+      })
+      .catch(err => {
+        console.error("❌ Error en enviarCalificacion():", err);
+        alert("❌ Error al enviar la calificación.");
+      });
+    }
+
+    function cerrarSesion() {
+      window.location.href = "/seleccion_rol";
+    }
+   
+    // ==================== NOTIFICACIONES DE CHAT (sin modificar) ====================
+    socket.emit("unirse_sala_mensajes", { user_id: clienteId });
+    socket.on("nuevo_mensaje_directo", function(data) {
+      if (data.destinatario_id === clienteId) {
+        const botonChat = document.getElementById("botonChat");
+        if (botonChat && !document.getElementById("burbujaChat")) {
+          const burbuja = document.createElement("span");
+          burbuja.id = "burbujaChat";
+          burbuja.textContent = "🔴";
+          burbuja.style.marginLeft = "5px";
+          botonChat.appendChild(burbuja);
+        }
+        const sonido = document.getElementById("sonidoMensaje");
+        if (sonido) sonido.play();
+      }
+    });
+
+    document.addEventListener('click', () => {
+      const sonido = document.getElementById("sonidoMensaje");
+      if (sonido) sonido.play().catch(() => {});
+    }, { once: true });
+
+    setInterval(() => {
+      fetch("/verificar_mensajes_nuevos", { credentials: 'include' })
+      .then(res => {
+        if (!res.ok) console.error("❌ /verificar_mensajes_nuevos devolvió código:", res.status);
+        return res.json();
+      })
+      .then(data => {
+        if (data.mensajes_nuevos && !document.getElementById("burbujaChat")) {
+          const burbuja = document.createElement("span");
+          burbuja.textContent = "🔴";
+          burbuja.id = "burbujaChat";
+          burbuja.style.marginLeft = "5px";
+          const boton = document.getElementById("botonChat");
+          if (boton) boton.appendChild(burbuja);
+        }
+      })
+      .catch(err => console.error("❌ Error en verificar_mensajes_nuevos():", err));
+    }, 5000);
+  </script>
+
+  
+<!-- ==================== SCRIPT SECUNDARIO: GEOLOCALIZACIÓN CÍCLICA ==================== -->
+<script>
+  function guardarUbicacionAlCargar(lat, lng) {
+    fetch('/actualizar_ubicacion_cliente', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ latitud: lat, longitud: lng })
+    })
+    .then(res => {
+      if (!res.ok) console.error("❌ /actualizar_ubicacion_cliente devolvió:", res.status);
+      return res.json();
+    })
+    .then(data => {
+      console.log("📍 Ubicación inicial guardada:", data);
+    })
+    .catch(err => console.error("❌ Error al guardar ubicación inicial:", err));
+  }
+
+  function enviarUbicacionCliente() {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(pos => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+
+        socket.emit("actualizar_ubicacion_cliente", {
+          cliente_id: {{ cliente.id }},
+          latitud: lat,
+          longitud: lng
+        });
+
+        console.log("📤 Cliente envió ubicación:", lat, lng);
+      });
+    }
+  }
+
+  setInterval(enviarUbicacionCliente, 5000);
+
+  // Definir los datos del cliente en JavaScript de forma segura
+ const clienteInfo = {
+    id: {{ cliente.id }},
+    nombre: "{{ cliente.nombre }}",
+    apellido: "{{ cliente.apellido }}",
+    telefono: "{{ cliente.telefono }}"
+  };
+
+<script>
+// Registra globalmente la función para que el mapa cargue bien
+window.initMap = initMap;
+</script>
+
+<script async defer
+  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBmVCNKb_sjx-vE5b1YoJpPUgm8Ub09ElE&callback=initMap">
+
+if (lavadorId && lavadorId !== "none") {
+  setInterval(() => {
+    obtenerUbicacionLavador();
+  }, 5000);
+}
+
+</script>
+<!-- 🔧 INICIO PARCHE: definir callbacks de geolocalización -->
+<script>
+function guardarUbicacionAlCargar(position){
+  try{
+    const lat = position.coords.latitude;
+    const lng = position.coords.longitude;
+    console.log("📍 Cliente ubicación:", lat, lng);
+    // Ajusta este endpoint si tu backend usa otro:
+    fetch("/actualizar_ubicacion_cliente", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      credentials: "include",
+      body: JSON.stringify({ latitud: lat, longitud: lng })
+    }).catch(()=>{});
+  }catch(e){ console.warn("guardarUbicacionAlCargar error:", e); }
+}
+function errorUbicacion(err){
+  console.warn("⚠️ Geoloc:", err && err.message ? err.message : err);
+}
+
+// Si ya llamas getCurrentPosition en otro <script>, déjalo.
+// Si no, activa esta línea:
+if (navigator.geolocation) {
+  navigator.geolocation.getCurrentPosition(guardarUbicacionAlCargar, errorUbicacion);
+}
+</script>
+<!-- 🔧 FIN PARCHE -->
+
+</body>
+</html>

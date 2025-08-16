@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Lavadores Activos - LavaMovilFinal</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+        }
+        .lavador {
+            background-color: white;
+            margin: 15px auto;
+            padding: 15px;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 400px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            text-align: left;
+        }
+        .lavador p {
+            margin: 5px 0;
+        }
+        button {
+            padding: 10px 20px;
+            margin-top: 15px;
+            border: none;
+            border-radius: 5px;
+            background-color: #3498db;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Lavadores Activos</h1>
+
+    {% if lavadores %}
+        {% for lavador in lavadores %}
+            <div class="lavador">
+                <p><strong>Nombre:</strong> {{ lavador.nombre }} {{ lavador.apellido }}</p>
+                <p><strong>Teléfono:</strong> {{ lavador.telefono }}</p>
+                <p><strong>Estado:</strong> {{ lavador.estado }}</p>
+                <p><strong>Suscripción:</strong> {{ 'Activa' if lavador.suscrito else 'Inactiva' }}</p>
+            </div>
+        {% endfor %}
+    {% else %}
+        <p>No hay lavadores activos en este momento.</p>
+    {% endif %}
+
+    <button onclick="volverAlInicio()">Volver al Inicio</button>
+
+    <script>
+        function volverAlInicio() {
+            window.location.href = "/admin_dashboard";
+        }
+    </script>
+
+</body>
+</html>

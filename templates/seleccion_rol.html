@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Seleccionar Rol - LavaMovilFinal</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: #f4f8fb;
+            text-align: center;
+            padding: 50px 20px;
+        }
+        h1 {
+            color: #2c3e50;
+        }
+        form {
+            margin-top: 30px;
+        }
+        button {
+            padding: 15px 30px;
+            margin: 15px;
+            font-size: 16px;
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            color: white;
+            width: 80%;
+            max-width: 300px;
+        }
+        .cliente { background-color: #007bff; }
+        .cliente:hover { background-color: #0056b3; }
+
+        .lavador { background-color: #28a745; }
+        .lavador:hover { background-color: #1c7c31; }
+
+        .checkbox {
+            margin-top: 30px;
+            font-size: 14px;
+            color: #555;
+        }
+        .checkbox input {
+            margin-right: 8px;
+        }
+
+        .terminos-link {
+            color: #007bff;
+            text-decoration: none;
+        }
+        .terminos-link:hover {
+            text-decoration: underline;
+        }
+
+        .boton-desactivado {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Selecciona tu Rol</h1>
+
+    <form method="POST" action="/seleccionar_rol" onsubmit="return validarTerminos()">
+        <div class="checkbox">
+            <input type="checkbox" id="acepta_terminos">
+            He leído y acepto los <a href="/terminos" class="terminos-link" target="_blank">Términos y Condiciones</a>
+        </div>
+
+        <input type="hidden" name="rol" id="rolSeleccionado">
+        <button type="submit" class="cliente" onclick="seleccionarRol('cliente')">Ingresar como Cliente</button><br>
+        <button type="submit" class="lavador" onclick="seleccionarRol('lavador')">Ingresar como Lavador</button>
+    </form>
+
+    <script>
+        function seleccionarRol(rol) {
+            document.getElementById('rolSeleccionado').value = rol;
+        }
+
+        function validarTerminos() {
+            const aceptado = document.getElementById("acepta_terminos").checked;
+            if (!aceptado) {
+                alert("Debes aceptar los Términos y Condiciones para continuar.");
+                return false;
+            }
+            return true;
+        }
+    </script>
+
+</body>
+</html>
