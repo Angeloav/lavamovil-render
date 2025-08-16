@@ -12,39 +12,23 @@ from flask_session import Session
 from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user, login_required
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
-import os
 
-from flask_socketio import SocketIO
-ASYNC_MODE = "eventlet" if not IS_WINDOWS else "threading"
-
-socketio = SocketIO(
-    app,
-    async_mode=ASYNC_MODE,
-    cors_allowed_origins="*",
-    logger=True,
-    engineio_logger=True,
-)
-
-# Configuración inicial de la app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
 
-# ✅ Corrección importante para que la base de datos NO se cree dentro de instance/
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(basedir, "lavamovil.db")}'
-
-# Rutas para cargar archivos
 app.config['UPLOAD_FOLDER'] = 'static/bauches'
-
-# Configuración de la sesión
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['SESSION_FILE_DIR'] = os.path.join(os.getcwd(), 'flask_session')
 
-# 🔧 INICIO PARCHE — ORDEN CORRECTO
+
 db = SQLAlchemy(app)
 Session(app)
+
+ASYNC_MODE = "eventlet" if not IS_WINDOWS else "threading"
 socketio = SocketIO(app, async_mode="eventlet", cors_allowed_origins="*", logger=True, engineio_logger=True)
-# 🔧 FIN PARCHE
+                    logger=True, engineio_logger=True)
 
 # Modelos
 class Usuario(db.Model):
