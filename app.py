@@ -27,7 +27,13 @@ db = SQLAlchemy(app)
 Session(app)
 
 ASYNC_MODE = "eventlet" if not IS_WINDOWS else "threading"
-socketio = SocketIO(app, async_mode=ASYNC_MODE, cors_allowed_origins="*", logger=True, engineio_logger=True)
+socketio = SocketIO(
+    app,
+    async_mode=ASYNC_MODE,
+    cors_allowed_origins="*",
+    logger=False,
+    engineio_logger=False
+)
 
 # Modelos
 class Usuario(db.Model):
