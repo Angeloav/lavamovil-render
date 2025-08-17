@@ -1,11 +1,3 @@
-import os 
-IS_WINDOWS = os.name == "nt"
-
-# Usa eventlet solo cuando NO sea Windows (ej. Render)
-if not IS_WINDOWS:
-    import eventlet
-    eventlet.monkey_patch()
-
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, emit, join_room
@@ -13,27 +5,28 @@ from flask_session import Session
 from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user, login_required
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
+import os
 
+# Configuración inicial de la app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
 
+# ✅ Corrección importante para que la base de datos NO se cree dentro de instance/
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(basedir, "lavamovil.db")}'
+
+# Rutas para cargar archivos
 app.config['UPLOAD_FOLDER'] = 'static/bauches'
+
+# Configuración de la sesión
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['SESSION_FILE_DIR'] = os.path.join(os.getcwd(), 'flask_session')
 
+# 🔧 INICIO PARCHE — ORDEN CORRECTO
 db = SQLAlchemy(app)
 Session(app)
-
-ASYNC_MODE = "eventlet" if not IS_WINDOWS else "threading"
-socketio = SocketIO(
-    app,
-    async_mode=ASYNC_MODE,
-    cors_allowed_origins="*",
-    logger=False,
-    engineio_logger=False
-)
+socketio = SocketIO(app, async_mode="eventlet", cors_allowed_origins="*", logger=True, engineio_logger=True)
+# 🔧 FIN PARCHE
 
 # Modelos
 class Usuario(db.Model):
@@ -699,8 +692,7 @@ def obtener_ubicacion_cliente_directo():
         return jsonify({'lat': cliente.latitud, 'lng': cliente.longitud})
     
     return jsonify({'error': 'Cliente no encontrado'}), 404
-
-
+    
 # 🔧 INICIO PARCHE UNION SALA (SERVIDOR)
 @socketio.on("unirse_sala_privada")
 def manejar_union_sala(data):
@@ -834,6 +826,46 @@ def actualizar_ubicacion_cliente(data):
                 "longitud": lng
             }, room=f"lavador_{solicitud.lavador_id}")
 
+@app.route('/solicitud_activa')
+def obtener_solicitud_activa():
+    lavador_id = request.args.get('lavador_id') or session.get('usuario_id')
+    if not lavador_id:
+        return jsonify({})
+    
+    solicitud = Solicitud.query.filter_by(lavador_id=lavador_id, estado='aceptado').first()
+    if solicitud:
+        return jsonify({
+            'estado': solicitud.estado,
+            'cliente_id': solicitud.cliente_id,
+            'lavador_id': solicitud.lavador_id
+        })
+    return jsonify({})
+
+@app.route('/activar_admin')
+def activar_admin():
+    admin = Usuario.query.filter_by(rol='admin').first()
+    if admin:
+        session.clear()
+        session['usuario_id'] = admin.id
+        print(f"✅ Admin activado en sesión: {admin.nombre} (ID: {admin.id})")
+        return redirect(url_for('admin_dashboard'))
+    return "❌ No se encontró un usuario con rol admin."
+
+@app.route('/ver_calificaciones/<int:lavador_id>')
+def ver_calificaciones(lavador_id):
+    calificaciones = Solicitud.query.filter_by(lavador_id=lavador_id).filter(Solicitud.calificacion != None).all()
+    resultado = []
+    for c in calificaciones:
+        cliente = Usuario.query.get(c.cliente_id)
+        resultado.append({
+            'nombre': cliente.nombre,
+            'apellido': cliente.apellido,
+            'calificacion': c.calificacion,
+            'comentario': c.comentario or ""
+        })
+    return jsonify(resultado)
+
+
 @app.route('/chat')  
 def chat():
     rol = request.args.get('rol')
@@ -885,45 +917,6 @@ def chat():
         return redirect('/lavador_dashboard')
 
     return redirect('/')
-
-@app.route('/solicitud_activa')
-def obtener_solicitud_activa():
-    lavador_id = request.args.get('lavador_id') or session.get('usuario_id')
-    if not lavador_id:
-        return jsonify({})
-    
-    solicitud = Solicitud.query.filter_by(lavador_id=lavador_id, estado='aceptado').first()
-    if solicitud:
-        return jsonify({
-            'estado': solicitud.estado,
-            'cliente_id': solicitud.cliente_id,
-            'lavador_id': solicitud.lavador_id
-        })
-    return jsonify({})
-
-@app.route('/activar_admin')
-def activar_admin():
-    admin = Usuario.query.filter_by(rol='admin').first()
-    if admin:
-        session.clear()
-        session['usuario_id'] = admin.id
-        print(f"✅ Admin activado en sesión: {admin.nombre} (ID: {admin.id})")
-        return redirect(url_for('admin_dashboard'))
-    return "❌ No se encontró un usuario con rol admin."
-
-@app.route('/ver_calificaciones/<int:lavador_id>')
-def ver_calificaciones(lavador_id):
-    calificaciones = Solicitud.query.filter_by(lavador_id=lavador_id).filter(Solicitud.calificacion != None).all()
-    resultado = []
-    for c in calificaciones:
-        cliente = Usuario.query.get(c.cliente_id)
-        resultado.append({
-            'nombre': cliente.nombre,
-            'apellido': cliente.apellido,
-            'calificacion': c.calificacion,
-            'comentario': c.comentario or ""
-        })
-    return jsonify(resultado)
 
 @app.route('/verificar_mensajes_nuevos')
 def verificar_mensajes_nuevos():
@@ -1054,6 +1047,9 @@ def _versions():
     }), 200
 # 🔧 FIN PARCHE
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    socketio.run(app, host="0.0.0.0", port=port, debug=IS_WINDOWS)
+if __name__ == '__main__':
+    with app.app_context():
+        if not os.path.exists('lavamovil.db'):
+            db.create_all()
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+
