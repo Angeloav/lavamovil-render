@@ -449,7 +449,7 @@ def solicitudes_activas():
             })
     return jsonify(resultado)
 
-@app.route('/aceptar_solicitud')
+@app.route('/aceptar_solicitud') 
 def aceptar_solicitud():
     if 'lavador_id' not in session:
         return jsonify({'error': 'No autorizado'}), 401
@@ -465,16 +465,17 @@ def aceptar_solicitud():
     if solicitud.estado != 'pendiente':
         return jsonify({'error': 'La solicitud ya fue gestionada'}), 400
 
-    lavador = Usuario.query.get(session['lavador_id'])  # ✅ cambio aquí
+    lavador = Usuario.query.get(session['lavador_id'])
     if not lavador:
         return jsonify({'error': 'Lavador no encontrado'}), 404
-
-    # Ya no necesitas volver a poner esto:
-    # session['lavador_id'] = lavador.id
 
     # ✅ Asignar el lavador a la solicitud
     solicitud.lavador_id = lavador.id
     solicitud.estado = 'aceptado'
+
+    # 🔴 PARCHE: marcar que el cliente tiene mensajes nuevos (para la burbuja)
+    solicitud.tiene_mensajes_nuevos = True
+
     db.session.commit()
     
     socketio.emit("nueva_solicitud_aceptada", {
@@ -491,7 +492,10 @@ def aceptar_solicitud():
         
     print(f"🧩 Solicitud {solicitud_id} aceptada por lavador {lavador.id}")
 
-    return jsonify({'message': 'Solicitud aceptada correctamente.'})
+    return jsonify({
+        'message': 'Solicitud aceptada correctamente.',
+        'cliente_id': solicitud.cliente_id   # 👈 lo necesitamos en el front
+    })
 
 @app.route('/iniciar_movimiento_manual', methods=['POST'])
 def iniciar_movimiento_manual():
@@ -711,47 +715,94 @@ def manejar_union_sala(data):
     emit("union_confirmada", {"sala": room})
 # 🔧 FIN PARCHE UNION SALA (SERVIDOR)
 
+@socketio.on("unirse_chat")
+def unirse_chat(data):
+    sala = (data or {}).get("sala")
+    if not sala or not isinstance(sala, str) or not sala.startswith("chat_"):
+        emit("union_error", {"motivo": "sala inválida o vacía"})
+        return
+    join_room(sala)
+    print(f"🟢 Usuario unido a sala de chat: {sala}")
+    emit("unido_chat", {"sala": sala})
+# ✅ NUEVO: cada usuario (cliente o lavador) entra a su sala "user_{id}"
+
+@socketio.on("unirse_sala_mensajes")
+def unirse_sala_mensajes(data):
+    uid = data.get("user_id")
+    if not uid:
+        return
+    try:
+        uid = int(uid)
+    except Exception:
+        pass
+    room = f"user_{uid}"
+    join_room(room)
+    emit("union_confirmada", {"sala": room})
+
+# ===========================
+# INICIO PARCHE: enviar_mensaje_privado (IDs a int + sala correcta)
+# ===========================
 @socketio.on("enviar_mensaje_privado")
 def manejar_mensaje_privado(data):
-    if not all(k in data for k in ("cliente_id", "lavador_id", "autor_id", "mensaje")):
+    # Validación básica
+    if not isinstance(data, dict) or not all(k in data for k in ("cliente_id", "lavador_id", "autor_id", "mensaje")):
         print("❌ Datos incompletos en el mensaje:", data)
+        emit("error_chat", {"motivo": "payload incompleto"})
         return
 
-    cliente_id = data["cliente_id"]
-    lavador_id = data["lavador_id"]
-    autor_id = data["autor_id"]
-    mensaje = data["mensaje"]
-    sala = f"chat_{min(cliente_id, lavador_id)}_{max(cliente_id, lavador_id)}"
+    # ⚠️ Casteo a int para evitar comparaciones lexicográficas
+    try:
+        cliente_id = int(data["cliente_id"])
+        lavador_id = int(data["lavador_id"])
+        autor_id   = int(data["autor_id"])
+    except Exception:
+        emit("error_chat", {"motivo": "IDs no numéricos"})
+        return
 
-    # Emitir mensaje en tiempo real
-    emit("recibir_mensaje_privado", {
-        "mensaje": mensaje,
-        "autor_id": autor_id
-    }, room=sala)
+    mensaje = (data.get("mensaje") or "").strip()
+    if not mensaje:
+        emit("error_chat", {"motivo": "mensaje vacío"})
+        return
 
-    # Enviar también al usuario directo para notificación
+    # Sala canónica: chat_<menor>_<mayor>
+    menor = min(cliente_id, lavador_id)
+    mayor = max(cliente_id, lavador_id)
+    sala  = f"chat_{menor}_{mayor}"
+
+    # Emitir mensaje en tiempo real a la sala del chat
+    payload = {
+        "mensaje":    mensaje,
+        "autor_id":   autor_id,
+        "cliente_id": cliente_id,
+        "lavador_id": lavador_id,
+        "sala":       sala,
+    }
+    emit("recibir_mensaje_privado", payload, room=sala)
+
+    # Notificación directa (siempre IDs int coherentes)
     destinatario_id = lavador_id if autor_id == cliente_id else cliente_id
-    emitir_mensaje_directo(destinatario_id, mensaje)
+    try:
+        emitir_mensaje_directo(destinatario_id, mensaje)
+    except Exception as e:
+        print("⚠️ emitir_mensaje_directo falló:", e)
 
-    # Guardar mensaje en la base de datos
-    nuevo = Mensaje(
-        de_id=autor_id,
-        para_id=destinatario_id,
-        texto=mensaje
-    )
+    # Guardar en DB
+    nuevo = Mensaje(de_id=autor_id, para_id=destinatario_id, texto=mensaje)
     db.session.add(nuevo)
 
-    # Marcar solicitud como con mensajes nuevos si existe
+    # Marcar burbuja en la solicitud aceptada (match en cualquier orden)
     solicitud = Solicitud.query.filter(
         ((Solicitud.cliente_id == cliente_id) & (Solicitud.lavador_id == lavador_id)) |
         ((Solicitud.cliente_id == lavador_id) & (Solicitud.lavador_id == cliente_id)),
         Solicitud.estado == 'aceptado'
     ).first()
-
     if solicitud:
         solicitud.tiene_mensajes_nuevos = True
 
     db.session.commit()
+# ===========================
+# FIN PARCHE: enviar_mensaje_privado
+# ===========================
 
 @socketio.on('connect')
 def handle_connect():
@@ -822,8 +873,10 @@ def actualizar_ubicacion_cliente(data):
             print(f"📍 Ubicación actualizada para cliente {cliente_id}: {lat}, {lng}")
             # También podemos emitir al lavador para que se actualice el marcador del cliente
             socketio.emit("actualizar_ubicacion_cliente", {
+                "cliente_id": cliente_id,
                 "latitud": lat,
-                "longitud": lng
+                "longitud": lng,
+                "mensaje": "El lavador ha aceptado tu solicitud y va en camino."
             }, room=f"lavador_{solicitud.lavador_id}")
 
 @app.route('/solicitud_activa')
@@ -865,8 +918,7 @@ def ver_calificaciones(lavador_id):
         })
     return jsonify(resultado)
 
-
-@app.route('/chat')  
+@app.route('/chat')
 def chat():
     rol = request.args.get('rol')
 
@@ -874,9 +926,17 @@ def chat():
         cliente_id = session.get('cliente_id')
         if cliente_id:
             cliente = Usuario.query.get(cliente_id)
-            solicitud = Solicitud.query.filter_by(cliente_id=cliente.id, estado='aceptado').first()
+            solicitud = Solicitud.query.filter_by(
+                cliente_id=cliente.id, estado='aceptado'
+            ).first()
 
             if solicitud:
+                # ===== INICIO PARCHE RESET BURBUJA (cliente abre chat) =====
+                if getattr(solicitud, "tiene_mensajes_nuevos", False):
+                    solicitud.tiene_mensajes_nuevos = False
+                    db.session.commit()
+                # ===== FIN PARCHE RESET BURBUJA =====
+
                 lavador = Usuario.query.get(solicitud.lavador_id)
                 sala = f"chat_{min(cliente.id, lavador.id)}_{max(cliente.id, lavador.id)}"
                 titulo_chat = f"Chat con {lavador.nombre} (Lavador)"
@@ -890,16 +950,24 @@ def chat():
                     sala=sala
                 )
 
-        # ❌ Si no hay solicitud válida, redirigir
+        # Si no hay solicitud válida
         return redirect('/cliente_dashboard')
 
     elif rol == 'lavador':
         lavador_id = session.get('lavador_id')
         if lavador_id:
             lavador = Usuario.query.get(lavador_id)
-            solicitud = Solicitud.query.filter_by(lavador_id=lavador.id, estado='aceptado').first()
+            solicitud = Solicitud.query.filter_by(
+                lavador_id=lavador.id, estado='aceptado'
+            ).first()
 
             if solicitud:
+                # ===== INICIO PARCHE RESET BURBUJA (lavador abre chat) =====
+                if getattr(solicitud, "tiene_mensajes_nuevos", False):
+                    solicitud.tiene_mensajes_nuevos = False
+                    db.session.commit()
+                # ===== FIN PARCHE RESET BURBUJA =====
+
                 cliente = Usuario.query.get(solicitud.cliente_id)
                 sala = f"chat_{min(cliente.id, lavador.id)}_{max(cliente.id, lavador.id)}"
                 titulo_chat = f"Chat con {cliente.nombre} (Cliente)"
@@ -913,7 +981,7 @@ def chat():
                     sala=sala
                 )
 
-        # ❌ Si no hay solicitud válida, redirigir
+        # Si no hay solicitud válida
         return redirect('/lavador_dashboard')
 
     return redirect('/')
@@ -1001,13 +1069,31 @@ def actualizar_ubicacion_lavador():
         return jsonify({"error": "Coordenadas inválidas"}), 400
 
     lavador = Usuario.query.get(user_id)
-    if lavador:
-        lavador.latitud = lat
-        lavador.longitud = lng
-        db.session.commit()
-        return jsonify({"success": True})
+    if not lavador:
+        return jsonify({"error": "Lavador no encontrado"}), 404
 
-    return jsonify({"error": "Lavador no encontrado"}), 404
+    # 1) Guardar en BD
+    lavador.latitud = lat
+    lavador.longitud = lng
+    db.session.commit()
+
+    # 2) Buscar solicitud aceptada de ESTE lavador
+    solicitud = Solicitud.query.filter_by(lavador_id=user_id, estado='aceptado').first()
+
+    # 3) Si hay cliente asignado, EMITIR a su sala para que vea el movimiento en vivo
+    if solicitud:
+        socketio.emit(
+            "ubicacion_lavador",
+            {
+                "cliente_id": solicitud.cliente_id,  # útil para filtrar en front si quieres
+                "lavador_id": user_id,
+                "latitud": lat,
+                "longitud": lng
+            },
+            room=f"user_{solicitud.cliente_id}"
+        )
+
+    return jsonify({"success": True})
     
 @app.get("/debug_emit/<int:lavador_id>")
 def debug_emit(lavador_id):

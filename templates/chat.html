@@ -123,6 +123,17 @@
   const clienteNombre = "{{ cliente.nombre }}";
   const lavadorNombre = "{{ lavador.nombre }}";
   const nombreUsuario = "{{ cliente.nombre if rol == 'cliente' else lavador.nombre }}";
+  
+  // === JOIN A SALA chat_<menor>_<mayor> ===
+  const SALA_CHAT = `chat_${Math.min(clienteId, lavadorId)}_${Math.max(clienteId, lavadorId)}`;
+
+  function joinSalaChat() {
+    socket.emit("unirse_chat", { sala: SALA_CHAT });
+    console.log("✅ unido a", SALA_CHAT);
+  }
+
+  socket.on("connect", joinSalaChat);
+  socket.on("reconnect", joinSalaChat);
 
   socket.emit("unirse_sala_privada", {
     cliente_id: clienteId,
@@ -142,7 +153,7 @@
       mensajes.forEach(m => {
         const autor = m.autor_id === clienteId ? clienteNombre : lavadorNombre;
         const div = document.createElement("div");
-        div.className = m.autor_id === usuarioId ? "mio" : "otro";
+        div.className = `mensaje ${m.autor_id === usuarioId ? "mensaje-yo" : "mensaje-otro"}`;
         div.textContent = `${autor}: ${m.mensaje}`;
         document.getElementById("mensajes").appendChild(div);
       });
