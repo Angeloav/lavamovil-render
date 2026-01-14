@@ -5,8 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Panel del Lavador - LavaMovil</title>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-  <!-- ✅ clienteId se inicializa después del <body> (cuando #clienteData ya existe) -->
-<style>
+  <!-- 🔧 INICIO PARCHE: definir clienteId -->
+  <script>
+    const clienteIdEl = document.getElementById("clienteData");
+    let clienteId = clienteIdEl ? clienteIdEl.dataset.id : "none";
+  </script>
+  <!-- 🔧 FIN PARCHE -->
+
+  <style>
     body { font-family: 'Segoe UI', sans-serif; background-color: #121212; color: #ffffff; margin: 0; padding: 0; text-align: center; }
     h1 { color: #ffffff; font-size: 24px; margin-top: 20px; } p { color: #ffffff; } #estado { color: #ffffff; }
     #map { width: 90%; max-width: 360px; height: 250px; border-radius: 20px; margin: 20px auto; border: 1px solid #333; box-shadow: 0 4px 10px rgba(0,0,0,0.4); }
@@ -46,35 +52,11 @@
       background-color: #1c7c31;
     }
     select, textarea { width: 100%; max-width: 100%; padding: 12px; margin-top: 10px; border-radius: 8px; border: 1px solid #555; font-size: 14px; background-color: #2a2a2a; color: #ffffff; box-sizing: border-box; }
-
-    /* DEBUG CHIP (confirmar cambios en producción) */
-    #debugChipLavador {
-      position: fixed;
-      bottom: 10px;
-      right: 10px;
-      z-index: 99999999;
-      background: rgba(0,0,0,0.75);
-      color: #fff;
-      padding: 6px 10px;
-      border-radius: 12px;
-      font-size: 12px;
-      font-weight: 700;
-    }
-
   </style>
 </head>
 <body>
 
 {% include 'notificaciones.html' %}
-
-<div id="DEBUG_BANNER_LAVADOR_REAL" style="
-position:fixed;top:0;left:0;right:0;z-index:99999999;
-background:#e60000;color:#fff;font-size:18px;font-weight:900;
-text-align:center;padding:10px;">
-🚨 TEMPLATE REAL: templates/lavador_dashboard.html (DEBUG v1) 🚨
-</div>
-<div style="height:52px;"></div>
-
 
 <h1>Bienvenido Lavador {{ lavador.nombre }} {{ lavador.apellido }}</h1>
 <p>ID de Usuario: {{ lavador.id }}</p>
@@ -83,7 +65,6 @@ text-align:center;padding:10px;">
 <div id="solicitudAceptada" data-estado="{{ 'true' if solicitud_aceptada else 'false' }}"></div>
 <div id="estadoSolicitud" data-aceptada="{{ 'true' if solicitud_activa and solicitud_activa.estado == 'aceptado' else 'false' }}"></div>
 
-<div id="debugChipLavador">DEBUG v1: cargando...</div>
 
 <div id="notificacion">¡Nueva solicitud recibida!</div>
 <div id="map"></div>
@@ -127,29 +108,6 @@ function abrirChat() {
   const LAVADOR_ID = Number({{ lavador.id|tojson }});
 
   // estado de unión al chat
-
-  // ✅ Inicializar clienteId (ya existe #clienteData en el DOM aquí)
-  const clienteIdEl = document.getElementById("clienteData");
-  let clienteId = (clienteIdEl && clienteIdEl.dataset && clienteIdEl.dataset.id) ? clienteIdEl.dataset.id : "none";
-
-  // fallback: si venimos del chat o refresh, recupera clienteId guardado
-  const clienteIdLS = localStorage.getItem("clienteIdActual");
-  if ((clienteId === "none" || !clienteId) && clienteIdLS) {
-    clienteId = clienteIdLS;
-    if (clienteIdEl) clienteIdEl.dataset.id = clienteId;
-  }
-
-  // refleja en el hidden del form del chat
-  const hiddenInit = document.getElementById("clienteIdHidden");
-  if (hiddenInit && clienteId && clienteId !== "none") hiddenInit.value = clienteId;
-
-  // Debug chip helper (global)
-  window.setDebugChip = function(texto) {
-    const chip = document.getElementById("debugChipLavador");
-    if (chip) chip.textContent = texto;
-  };
-  window.setDebugChip("DEBUG v1: JS activo ✅");
-
   let yaUnidoChat = false;
 
   // ======== unión robusta a sala chat_<menor>_<mayor>
@@ -172,7 +130,6 @@ function abrirChat() {
   // al conectar: sala privada + rejoin chat
   window.socket.on("connect", () => {
     console.log("🟢 Socket conectado:", window.socket.id);
-    window.setDebugChip("DEBUG v1: socket conectado ✅");
 
     // sala privada del lavador
     window.socket.emit("unirse_sala_privada", { lavador_id: lavadorId });
@@ -188,7 +145,7 @@ function abrirChat() {
   });
 
   // reconexiones: permitir rejoin siempre
-  window.socket.on("disconnect",        () => { yaUnidoChat = false; window.setDebugChip("DEBUG v1: socket OFFLINE ⚠️"); });
+  window.socket.on("disconnect",        () => { yaUnidoChat = false; });
   window.socket.on("reconnect",         () => { yaUnidoChat = false; joinSalaChatSiListo(); });
   window.socket.on("reconnect_attempt", () => { yaUnidoChat = false; });
 
@@ -203,49 +160,7 @@ function abrirChat() {
     if (data && data.cliente_id) {
       // si tu UI ya lo setea en otro lado, no pasa nada por re-asignar
       clienteId = data.cliente_id;
-      // guarda por si vuelve del chat
-      localStorage.setItem("clienteIdActual", String(clienteId));
-      const hidden = document.getElementById("clienteIdHidden");
-      if (hidden) hidden.value = clienteId;
       joinSalaChatSiListo();
-    }
-  });
-
-
-  // ✅ Cuando OTRO lavador acepta, limpiar mi UI (para que no se quede el letrero amarillo)
-  window.socket.on("solicitud_tomada", (payload) => {
-    console.log("🧹 solicitud_tomada recibida:", payload);
-    try {
-      const quienAcepto = payload && payload.lavador_id ? String(payload.lavador_id) : "";
-      const yo = String(lavadorId);
-
-      // si fui yo, no limpio
-      if (quienAcepto && yo && quienAcepto === yo) {
-        window.setDebugChip("DEBUG v1: acepté yo ✅");
-        return;
-      }
-
-      // limpiar UI
-      const cont = document.getElementById("solicitudes");
-      if (cont) cont.innerHTML = "";
-
-      const notif = document.getElementById("notificacion");
-      if (notif) notif.style.display = "none";
-
-      // reset clienteId + hidden + storage
-      clienteId = "none";
-      const clienteData = document.getElementById("clienteData");
-      if (clienteData) clienteData.dataset.id = "none";
-
-      const hidden = document.getElementById("clienteIdHidden");
-      if (hidden) hidden.value = "";
-
-      localStorage.removeItem("clienteIdActual");
-
-      window.setDebugChip("DEBUG v1: limpiado por otro ✅");
-    } catch (e) {
-      console.warn("⚠️ Error limpiando por solicitud_tomada:", e);
-      window.setDebugChip("DEBUG v1: error limpieza ⚠️");
     }
   });
 
@@ -405,7 +320,7 @@ window.initMap = initMap;  // ✅ Esto registra la función globalmente
 <script>
 function iniciarMovimientoCarritoCamioncito() {
   setInterval(() => {
-    obtenerUbicacionLavador();
+    actualizarUbicacionLavador();
     obtenerUbicacionCliente();
   }, 5000);
 }
@@ -555,17 +470,7 @@ function aceptar(id) {
     }
 
     clienteId = res.cliente_id;
-    if (clienteId && clienteId !== 'none') {
-      localStorage.setItem('clienteIdActual', String(clienteId));
-    }
-    joinSalaChatSiListo();
-
-    // 🔔 Intento de notificar a otros lavadores (requiere que el backend lo re-emita)
-    try {
-      socket.emit('solicitud_tomada', { solicitud_id: id, lavador_id: lavadorId, debug: 'front_v1' });
-      window.setDebugChip('DEBUG v1: emit solicitud_tomada ✅');
-    } catch(e) { console.warn('⚠️ no pude emitir solicitud_tomada:', e); }
-
+      joinSalaChatSiListo();
 
     // Asegura unión a la sala privada tras aceptar
     try {
