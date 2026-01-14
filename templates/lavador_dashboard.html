@@ -245,6 +245,69 @@
     cont.appendChild(wrap);
   });
 
+  // ====== Cuando el cliente cancela la solicitud ======
+  window.socket.on("solicitud_cancelada", (data) => {
+    try {
+      const cid = data && data.cliente_id ? String(data.cliente_id) : null;
+      const actual = (clienteId && clienteId !== "none") ? String(clienteId) : null;
+      const guardado = localStorage.getItem("lm_cliente_activo");
+
+      if (!cid || cid === actual || cid === String(guardado)) {
+        const notif = document.getElementById("notificacion");
+        if (notif) notif.style.display = "none";
+
+        const cont = document.getElementById("solicitudes");
+        if (cont) cont.innerHTML = "";
+
+        clienteId = "none";
+        const cd = document.getElementById("clienteData");
+        if (cd) cd.dataset.id = "none";
+
+        try { localStorage.removeItem("lm_cliente_activo"); } catch(e) {}
+
+        const hidden = document.getElementById("clienteIdHidden");
+        if (hidden) hidden.value = "";
+
+        if (rutaPolyline) { rutaPolyline.setMap(null); rutaPolyline = null; }
+        if (clienteMarker) { clienteMarker.setMap(null); clienteMarker = null; }
+        yaUnidoChat = false;
+      }
+    } catch(e) {}
+  });
+
+  // ====== Cuando el cliente finaliza / califica ======
+  window.socket.on("servicio_finalizado", (data) => {
+    try {
+      const cid = data && data.cliente_id ? String(data.cliente_id) : null;
+      const actual = (clienteId && clienteId !== "none") ? String(clienteId) : null;
+      const guardado = localStorage.getItem("lm_cliente_activo");
+
+      if (!cid || cid === actual || cid === String(guardado)) {
+        const notif = document.getElementById("notificacion");
+        if (notif) notif.style.display = "none";
+
+        const cont = document.getElementById("solicitudes");
+        if (cont) cont.innerHTML = "";
+
+        clienteId = "none";
+        const cd = document.getElementById("clienteData");
+        if (cd) cd.dataset.id = "none";
+
+        try { localStorage.removeItem("lm_cliente_activo"); } catch(e) {}
+
+        const hidden = document.getElementById("clienteIdHidden");
+        if (hidden) hidden.value = "";
+
+        if (rutaPolyline) { rutaPolyline.setMap(null); rutaPolyline = null; }
+        if (clienteMarker) { clienteMarker.setMap(null); clienteMarker = null; }
+
+        const cal = document.getElementById("calificaciones");
+        if (cal) cal.style.display = "none";
+        yaUnidoChat = false;
+      }
+    } catch(e) {}
+  });
+
   // Cuando otro lavador acepta: limpiar esta solicitud aquí
   window.socket.on("nueva_solicitud_aceptada", (data) => {
     if (!data) return;
@@ -390,7 +453,7 @@
         trazarRutaSiSePuede();
       },
       () => {},
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 }
     );
   }
 
@@ -404,11 +467,12 @@
 
     // trae cliente al iniciar
     obtenerUbicacionCliente();
-    setInterval(obtenerUbicacionCliente, 5000);
+    setInterval(obtenerUbicacionCliente, 8000);
 
-    // permiso ubicación
-    const permiso = confirm("🚗 LavaMovil necesita acceso a tu ubicación para encontrar al cliente. ¿Deseas permitirlo?");
-    if (permiso) iniciarGPSLavador();
+    // permiso ubicación (desactivado en móvil por cierres)
+     //const permiso = confirm("🚗 LavaMovil necesita acceso a tu ubicación para encontrar al cliente. ¿Deseas permitirlo?");
+     //if (permiso) iniciarGPSLavador();
+     iniciarGPSLavador();
   }
 
   window.initMap = initMap;
