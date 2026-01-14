@@ -1,27 +1,34 @@
-<!-- NOTIFICACIONES PARCIAL (SAFE) -->
+<!-- templates/notificaciones.html  (PARCIAL SAFE: NO <html>, NO <body>, NO estilos globales) -->
+
 <div id="notificaciones-wrapper"></div>
 
 <script>
 (function () {
-  const wrap = document.getElementById("notificaciones-wrapper");
-  if (!wrap) return;
+  // Notificación simple, no rompe nada.
+  window.mostrarNotificacion = function (texto, ms) {
+    try {
+      const n = document.createElement("div");
+      n.textContent = (texto ?? "Notificación");
 
-  // ejemplo: notificación simple
-  window.mostrarNotificacion = function (texto) {
-    let n = document.createElement("div");
-    n.textContent = texto;
-    n.style.position = "fixed";
-    n.style.top = "60px";
-    n.style.left = "50%";
-    n.style.transform = "translateX(-50%)";
-    n.style.background = "#ffc107";
-    n.style.color = "#000";
-    n.style.padding = "10px 16px";
-    n.style.borderRadius = "12px";
-    n.style.zIndex = "9999999";
-    n.style.fontWeight = "bold";
-    document.body.appendChild(n);
-    setTimeout(() => n.remove(), 4000);
+      n.style.position = "fixed";
+      n.style.top = "60px";
+      n.style.left = "50%";
+      n.style.transform = "translateX(-50%)";
+      n.style.background = "#ffc107";
+      n.style.color = "#000";
+      n.style.padding = "10px 16px";
+      n.style.borderRadius = "12px";
+      n.style.zIndex = "9999999";
+      n.style.fontWeight = "800";
+      n.style.boxShadow = "0 6px 18px rgba(0,0,0,.35)";
+      n.style.maxWidth = "92%";
+      n.style.textAlign = "center";
+
+      document.body.appendChild(n);
+      setTimeout(() => n.remove(), Number(ms || 3000));
+    } catch (e) {
+      console.warn("mostrarNotificacion error:", e);
+    }
   };
 })();
 </script>
