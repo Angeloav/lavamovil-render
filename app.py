@@ -662,17 +662,41 @@ def cancelar_solicitud():
     ).first()
 
     if solicitud:
-        lavador = Usuario.query.get(solicitud.lavador_id)
-        cliente = Usuario.query.get(solicitud.cliente_id)
+        solicitud_id = solicitud.id  # ✅ guardar antes de borrar
+        lavador_id = solicitud.lavador_id  # ✅ guardar antes de borrar
+
+        lavador = Usuario.query.get(lavador_id) if lavador_id else None
+        cliente = Usuario.query.get(cliente_id)
 
         db.session.delete(solicitud)
         db.session.commit()
 
-        if lavador:
-            socketio.emit('notificacion_lavador', {
-                'titulo': 'Solicitud cancelada',
-                'mensaje': f'El cliente {cliente.nombre} canceló la solicitud.'
-            })
+        # ===== INICIO PARCHE: limpiar solicitud en TODOS los lavadores =====
+        try:
+            socketio.emit(
+                "solicitud_cancelada",
+                {"cliente_id": cliente_id, "solicitud_id": solicitud_id},
+                broadcast=True
+            )
+            print("✅ Emit solicitud_cancelada:", cliente_id, solicitud_id)
+        except Exception as e:
+            print("❌ ERROR emit solicitud_cancelada:", e)
+        # ===== FIN PARCHE =====
+
+        # ===== INICIO PARCHE: notificar al lavador específico (si existe) =====
+        try:
+            if lavador_id:
+                socketio.emit(
+                    "notificacion_lavador",
+                    {
+                        "titulo": "Solicitud cancelada",
+                        "mensaje": f'El cliente {cliente.nombre} canceló la solicitud.'
+                    },
+                    room=f"lavador_{lavador_id}"
+                )
+        except Exception as e:
+            print("❌ ERROR emit notificacion_lavador room:", e)
+        # ===== FIN PARCHE =====
 
         return jsonify({'message': 'Solicitud cancelada correctamente.'})
     else:
