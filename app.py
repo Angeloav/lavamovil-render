@@ -573,7 +573,7 @@ def solicitudes_activas():
             })
     return jsonify(resultado)
 
-@app.route('/aceptar_solicitud') 
+@app.route('/aceptar_solicitud')
 def aceptar_solicitud():
     if 'lavador_id' not in session:
         return jsonify({'error': 'No autorizado'}), 401
@@ -597,28 +597,42 @@ def aceptar_solicitud():
     solicitud.lavador_id = lavador.id
     solicitud.estado = 'aceptado'
 
-    # 🔴 PARCHE: marcar que el cliente tiene mensajes nuevos (para la burbuja)
+    # 🔴 Mantener tu parche de burbuja
     solicitud.tiene_mensajes_nuevos = True
 
     db.session.commit()
-    
-    socketio.emit("nueva_solicitud_aceptada", {
-        'lavador_id': lavador.id,
-        'cliente_id': solicitud.cliente_id
-    })
 
+    # ✅ AVISO A TODOS LOS LAVADORES: "YA FUE ACEPTADA, LIMPIEN"
+    payload = {
+        'lavador_id': lavador.id,
+        'cliente_id': solicitud.cliente_id,
+        'solicitud_id': solicitud.id
+    }
+
+    try:
+        socketio.emit("nueva_solicitud_aceptada", payload, broadcast=True)
+        print("✅ broadcast nueva_solicitud_aceptada:", payload)
+    except Exception as e:
+        print("❌ ERROR broadcast nueva_solicitud_aceptada:", e)
+
+    # ✅ Notificación al cliente
     cliente = Usuario.query.get(solicitud.cliente_id)
     if cliente:
-        socketio.emit('notificacion_cliente', {
-            'cliente_id': cliente.id,
-            'mensaje': f'El lavador ha aceptado tu solicitud y va en camino.'
-        })  
-        
+        try:
+            socketio.emit('notificacion_cliente', {
+                'cliente_id': cliente.id,
+                'mensaje': 'El lavador ha aceptado tu solicitud y va en camino.'
+            })
+        except Exception as e:
+            print("❌ ERROR emit notificacion_cliente:", e)
+
     print(f"🧩 Solicitud {solicitud_id} aceptada por lavador {lavador.id}")
 
     return jsonify({
         'message': 'Solicitud aceptada correctamente.',
-        'cliente_id': solicitud.cliente_id   # 👈 lo necesitamos en el front
+        'cliente_id': solicitud.cliente_id,
+        'solicitud_id': solicitud.id,
+        'lavador_id': lavador.id
     })
 
 @app.route('/iniciar_movimiento_manual', methods=['POST'])
