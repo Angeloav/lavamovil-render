@@ -187,35 +187,54 @@ def registro_lavador():
         apellido = (request.form.get('apellido') or '').strip()
         telefono = (request.form.get('telefono') or '').strip()
 
-        # ===== INICIO PARCHE: reusar lavador por telefono (evita re-pago) =====
-        # normalizar un poco (opcional, pero ayuda)
+        # Normalizar teléfono: solo dígitos
         telefono_norm = ''.join(ch for ch in telefono if ch.isdigit())
 
+        # Buscar lavador existente por teléfono (normalizado o crudo)
         lavador_existente = None
         if telefono_norm:
+            lavador_existente = Usuario.query.filter(
+                Usuario.rol == 'lavador',
+                (Usuario.telefono == telefono_norm) | (Usuario.telefono == telefono)
+            ).order_by(Usuario.id.desc()).first()
+        else:
             lavador_existente = Usuario.query.filter_by(
                 rol='lavador',
-                telefono=telefono_norm
+                telefono=telefono
             ).order_by(Usuario.id.desc()).first()
 
         if lavador_existente:
-            # actualiza datos básicos si vienen (sin romper nada)
-            if nombre: lavador_existente.nombre = nombre
-            if apellido: lavador_existente.apellido = apellido
+            # Actualiza datos básicos si vienen
+            if nombre:
+                lavador_existente.nombre = nombre
+            if apellido:
+                lavador_existente.apellido = apellido
+
+            # Normaliza teléfono si aplica
+            if telefono_norm:
+                lavador_existente.telefono = telefono_norm
+            elif telefono:
+                lavador_existente.telefono = telefono
+
             db.session.commit()
 
+            # Guardar sesión SIEMPRE igual
             session['lavador_id'] = lavador_existente.id
+            session['lavador_nombre'] = lavador_existente.nombre or nombre
+            session['lavador_apellido'] = lavador_existente.apellido or apellido
+            session['lavador_telefono'] = lavador_existente.telefono or (telefono_norm if telefono_norm else telefono)
             session.permanent = True
 
-            # Si ya está pago y vigente -> directo al dashboard
+            # ✅ SI está vigente -> DIRECTO al dashboard (solo llenó formulario 1)
             if lavador_existente.fecha_expiracion and lavador_existente.fecha_expiracion > datetime.utcnow():
                 return redirect(url_for('lavador_dashboard'))
 
-            # Si no está vigente -> sigue flujo normal (formulario/pago)
+            # ✅ NO vigente -> entra al flujo de completar perfil/pago
+            # Forzamos mostrar el formulario 2 al menos una vez cuando viene desde registro
+            session["forzar_formulario_lavador"] = True
             return redirect(url_for('lavador_formulario'))
-        # ===== FIN PARCHE =====
 
-        # Si no existe, se crea nuevo (como antes)
+        # Si no existe, crear nuevo (lavador nuevo)
         lavador = Usuario(
             rol='lavador',
             nombre=nombre,
@@ -225,12 +244,19 @@ def registro_lavador():
         db.session.add(lavador)
         db.session.commit()
 
+        # Guardar sesión igual que arriba
         session['lavador_id'] = lavador.id
+        session['lavador_nombre'] = lavador.nombre
+        session['lavador_apellido'] = lavador.apellido
+        session['lavador_telefono'] = lavador.telefono
         session.permanent = True
 
+        # ✅ Nuevo -> debe ver formulario 2 sí o sí y luego pagar
+        session["forzar_formulario_lavador"] = True
         return redirect(url_for('lavador_formulario'))
 
     return render_template('registro_lavador.html')
+
 
 @app.route('/lavador_formulario', methods=['GET', 'POST'])
 def lavador_formulario():
@@ -241,20 +267,26 @@ def lavador_formulario():
     if not lavador:
         return 'Lavador no encontrado. Por favor regístrate de nuevo.'
 
-    if lavador.nombre and lavador.apellido and lavador.id_personal:
+    # ===== INICIO PARCHE: control del paso 2 =====
+    # Si venimos desde /registro_lavador, mostramos este paso sí o sí UNA vez.
+    forzar = session.pop("forzar_formulario_lavador", False)
+
+    # Si NO estamos forzando, y ya tiene el perfil completo, no mostramos el paso 2 (va a pago)
+    if (not forzar) and lavador.nombre and lavador.apellido and lavador.id_personal:
         return redirect(url_for('lavador_pago'))
+    # ===== FIN PARCHE =====
 
     if request.method == 'POST':
-        lavador.nombre = request.form['nombre']
-        lavador.apellido = request.form['apellido']
-        lavador.id_personal = request.form['id_personal']
-        lavador.telefono = request.form['telefono']
-        lavador.descripcion = request.form['descripcion']
+        lavador.nombre = (request.form.get('nombre') or '').strip()
+        lavador.apellido = (request.form.get('apellido') or '').strip()
+        lavador.id_personal = (request.form.get('id_personal') or '').strip()
+        lavador.telefono = (request.form.get('telefono') or '').strip()
+        lavador.descripcion = (request.form.get('descripcion') or '').strip()
         lavador.estado = 'inactivo'
         db.session.commit()
         return redirect(url_for('lavador_pago'))
 
-    return render_template('lavador_formulario.html', lavador=lavador)  # 👈 ESTA LÍNEA ES CLAVE
+    return render_template('lavador_formulario.html', lavador=lavador)
 
 @app.route('/lavador_pago')
 def lavador_pago():
@@ -744,15 +776,20 @@ def admin_logout():
 
 @app.route('/cancelar_solicitud', methods=["POST"])
 def cancelar_solicitud():
+    # ===== INICIO PARCHE CANCELAR SOLICITUD (RUTA COMPLETA) =====
+
+    # 1) Obtener cliente_id de la sesión (soporta ambos nombres)
     cliente_id = session.get("cliente_id") or session.get("usuario_id")
     if not cliente_id:
         return jsonify({'message': 'No hay cliente en sesión'}), 401
 
+    # 2) Normalizar a int si llega como string
     try:
         cliente_id = int(cliente_id)
     except Exception:
         pass
 
+    # 3) Buscar solicitud activa del cliente
     solicitud = Solicitud.query.filter(
         Solicitud.cliente_id == cliente_id,
         Solicitud.estado != 'finalizado'
@@ -761,27 +798,45 @@ def cancelar_solicitud():
     if not solicitud:
         return jsonify({'message': 'No se encontró una solicitud activa para cancelar.'}), 404
 
+    # 4) Guardar datos antes de borrar
     solicitud_id = solicitud.id
     lavador_id = solicitud.lavador_id
 
     cliente = Usuario.query.get(cliente_id)
     lavador = Usuario.query.get(lavador_id) if lavador_id else None
 
-    db.session.delete(solicitud)
-    db.session.commit()
-
-    # ✅ AVISO GLOBAL (para limpiar en todos los lavadores y el cliente)
+    # 5) Borrar solicitud
     try:
-        socketio.emit("solicitud_cancelada", {
-            "cliente_id": cliente_id,
-            "solicitud_id": solicitud_id,
-            "lavador_id": lavador_id
-        }, broadcast=True)
-        print("✅ Emit solicitud_cancelada:", cliente_id, solicitud_id, lavador_id)
+        db.session.delete(solicitud)
+        db.session.commit()
     except Exception as e:
-        print("❌ ERROR emit solicitud_cancelada:", e)
+        db.session.rollback()
+        print("❌ ERROR DB cancelar_solicitud:", e)
+        return jsonify({'message': 'Error cancelando la solicitud.'}), 500
 
-    # ✅ NOTIFICACIÓN al lavador asignado (si existía)
+    # 6) Emitir evento de cancelación (estable)
+    payload = {
+        "cliente_id": cliente_id,
+        "solicitud_id": solicitud_id,
+        "lavador_id": lavador_id
+    }
+
+    # 6.1) Global (a todos)
+    try:
+        socketio.emit("solicitud_cancelada", payload)
+        print("✅ Emit solicitud_cancelada GLOBAL:", payload)
+    except Exception as e:
+        print("❌ ERROR emit solicitud_cancelada GLOBAL:", e)
+
+    # 6.2) A la room del lavador asignado (por si el frontend escucha solo en room)
+    if lavador_id:
+        try:
+            socketio.emit("solicitud_cancelada", payload, room=f"lavador_{lavador_id}")
+            print("✅ Emit solicitud_cancelada ROOM:", f"lavador_{lavador_id}", payload)
+        except Exception as e:
+            print("❌ ERROR emit solicitud_cancelada ROOM:", e)
+
+    # 7) Notificación al lavador asignado (si existía)
     if lavador_id and lavador:
         try:
             socketio.emit('notificacion_lavador', {
@@ -792,6 +847,8 @@ def cancelar_solicitud():
             print("❌ ERROR emit notificacion_lavador:", e)
 
     return jsonify({'message': 'Solicitud cancelada correctamente.'})
+
+    # ===== FIN PARCHE CANCELAR SOLICITUD =====
 
 @app.route('/terminos')
 def terminos():
