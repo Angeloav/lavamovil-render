@@ -138,6 +138,9 @@
   <!-- ==================== SCRIPT PRINCIPAL ==================== -->
 <script>
   const socket         = io();
+  // ===== INICIO PARCHE: socket global =====
+  window.socket = socket;
+  // ===== FIN PARCHE =====
   const clienteId      = {{ cliente.id }};
   let lavadorId        = {{ solicitud_activa.lavador_id if solicitud_activa else 'null' }};
   const tieneSolicitud = {{ 'true' if solicitud_activa else 'false' }};
@@ -233,49 +236,49 @@
 </script>
 
 
-    <script>
-    // INICIO PARCHE CHAT CLIENTE
-    // =======================
-    
-    let unidoChatCliente = false;
-
-    function joinSalaChatClienteSiListo() {
-      if (!lavadorId || lavadorId === "null" || lavadorId === "none") return;
-      const C = Number(clienteId), L = Number(lavadorId);
-      if (!Number.isFinite(C) || !Number.isFinite(L)) return;
-
-      const sala = `chat_${Math.min(C,L)}_${Math.max(C,L)}`;
-      if (!unidoChatCliente) {
-        socket.emit("unirse_chat", { sala });
-        unidoChatCliente = true;
-        console.log("✅ Cliente unido a", sala);
-      }
-    }
-
-    // re-unirse tras reconexión
-    socket.on("connect", () => {
-      unidoChatCliente = false;     // fuerza rejoin
-      joinSalaChatClienteSiListo();
-      const t = setInterval(() => {
-        if (unidoChatCliente) return clearInterval(t);
-        joinSalaChatClienteSiListo();
-      }, 1000);
-    });
-    socket.on("disconnect", () => { unidoChatCliente = false; });
-
-    // escuchar mensajes en vivo (si no lo tienes ya)
-    socket.on("recibir_mensaje_privado", (data) => {
-      console.log("📥 (cliente) mensaje:", data);
-      const box = document.getElementById("mensajes") || document.body;
-      const p = document.createElement("p");
-      p.textContent = data.mensaje;
-      box.appendChild(p);
-      box.scrollTop = box.scrollHeight;
-    });
-    // =======================
-    // FIN PARCHE CHAT CLIENTE
-    // =======================
-    </script>
+    <!-- ===== INICIO PARCHE: BLOQUE DUPLICADO ELIMINADO (chat cliente duplicado) ===== -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- (linea reservada) -->
+    <!-- ===== FIN PARCHE: BLOQUE DUPLICADO ELIMINADO ===== -->
 
     <script>
     function initMap() {

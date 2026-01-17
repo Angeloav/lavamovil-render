@@ -246,34 +246,44 @@
   });
 
   // ====== Cuando el cliente cancela la solicitud ======
+  // ===== INICIO PARCHE: limpiar lavador en cancelacion rapida =====
   window.socket.on("solicitud_cancelada", (data) => {
     try {
-      const cid = data && data.cliente_id ? String(data.cliente_id) : null;
-      const actual = (clienteId && clienteId !== "none") ? String(clienteId) : null;
-      const guardado = localStorage.getItem("lm_cliente_activo");
+      if (!data) return;
 
-      if (!cid || cid === actual || cid === String(guardado)) {
-        const notif = document.getElementById("notificacion");
-        if (notif) notif.style.display = "none";
+      // cliente actual que este lavador tiene "en pantalla"
+      const hidden = document.getElementById("clienteIdHidden");
+      const clienteActual = (hidden && hidden.value && hidden.value !== "none") ? hidden.value : (window.clienteId || localStorage.getItem("clienteId"));
 
-        const cont = document.getElementById("solicitudes");
-        if (cont) cont.innerHTML = "";
+      // Si no hay clienteActual, igual limpia la UI (porque puede ser banner suelto)
+      const coincide = !clienteActual || String(data.cliente_id) === String(clienteActual);
 
-        clienteId = "none";
-        const cd = document.getElementById("clienteData");
-        if (cd) cd.dataset.id = "none";
+      if (!coincide) return;
 
-        try { localStorage.removeItem("lm_cliente_activo"); } catch(e) {}
+      console.log("🧼 Limpieza por solicitud_cancelada:", data);
 
-        const hidden = document.getElementById("clienteIdHidden");
-        if (hidden) hidden.value = "";
+      // Ocultar franja/botones/lista
+      const notif = document.getElementById("notificacionSolicitud");
+      if (notif) notif.style.display = "none";
 
-        if (rutaPolyline) { rutaPolyline.setMap(null); rutaPolyline = null; }
-        if (clienteMarker) { clienteMarker.setMap(null); clienteMarker = null; }
-        yaUnidoChat = false;
-      }
-    } catch(e) {}
+      const cont = document.getElementById("solicitudContainer");
+      if (cont) cont.innerHTML = "";
+
+      // Reset estado
+      if (hidden) hidden.value = "";
+      localStorage.setItem("clienteId", "none");
+      window.clienteId = null;
+
+      // Limpiar mapa
+      if (rutaPolyline) { rutaPolyline.setMap(null); rutaPolyline = null; }
+      if (clienteMarker) { clienteMarker.setMap(null); clienteMarker = null; }
+
+      yaUnidoChat = false;
+    } catch (e) {
+      console.log("❌ error en solicitud_cancelada:", e);
+    }
   });
+  // ===== FIN PARCHE =====
 
   // ====== Cuando el cliente finaliza / califica ======
   window.socket.on("servicio_finalizado", (data) => {
@@ -334,7 +344,12 @@
 
       const hidden = document.getElementById("clienteIdHidden");
       if (hidden) hidden.value = "";
-    }
+    
+
+      if (rutaPolyline) { rutaPolyline.setMap(null); rutaPolyline = null; }
+      if (clienteMarker) { clienteMarker.setMap(null); clienteMarker = null; }
+      yaUnidoChat = false;
+}
   });
 
   // Mensajes privados: burbuja + sonido
@@ -546,7 +561,9 @@
     fetch("/cambiar_estado", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ estado })
+      body: JSON.stringify({ estado }),
+      credentials: "include",
+      cache: "no-store"
     })
     .then(r => {
       if (!r.ok) throw new Error("HTTP " + r.status);

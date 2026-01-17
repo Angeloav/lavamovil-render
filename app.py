@@ -5,22 +5,46 @@ from flask_session import Session
 from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user, login_required
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
+from werkzeug.middleware.proxy_fix import ProxyFix
 import os
 
 # Configuración inicial de la app
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'secret!'
+# ===== INICIO PARCHE HTTPS REAL EN RENDER =====
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+# ===== FIN PARCHE HTTPS REAL EN RENDER =====
+
+app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+
+# ===== INICIO PARCHE SESION PERSISTENTE =====
+app.config["SESSION_PERMANENT"] = True
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)  # ajusta si quieres
+# ===== FIN PARCHE SESION PERSISTENTE =====
+
+# ===== INICIO PARCHE COOKIE PERSISTENTE (ANDROID/WEBVIEW) =====
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SECURE"] = True          # Render = https
+app.config["SESSION_COOKIE_SAMESITE"] = "None"      # clave para WebView/redirects
+app.config["SESSION_REFRESH_EACH_REQUEST"] = False  # evita re-escrituras raras
+# ===== FIN PARCHE COOKIE PERSISTENTE =====
 
 # ✅ Corrección importante para que la base de datos NO se cree dentro de instance/
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(basedir, "lavamovil.db")}'
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 # Rutas para cargar archivos
 app.config['UPLOAD_FOLDER'] = 'static/bauches'
 
 # Configuración de la sesión
 app.config['SESSION_TYPE'] = 'filesystem'
+app.config["SESSION_USE_SIGNER"] = True
+app.config["SESSION_COOKIE_NAME"] = "lavamovil_session"
 app.config['SESSION_FILE_DIR'] = os.path.join(os.getcwd(), 'flask_session')
+app.config["SESSION_FILE_THRESHOLD"] = 5000
+# ===== INICIO PARCHE CREAR SESSION DIR =====
+os.makedirs(app.config['SESSION_FILE_DIR'], exist_ok=True)
+# ===== FIN PARCHE =====
 
 # 🔧 INICIO PARCHE — ORDEN CORRECTO
 db = SQLAlchemy(app)
@@ -126,15 +150,50 @@ def cliente_dashboard():
 @app.route('/registro_lavador', methods=['GET', 'POST'])
 def registro_lavador():
     if request.method == 'POST':
-        nombre = request.form['nombre']
-        apellido = request.form['apellido']
-        telefono = request.form['telefono']
+        nombre = (request.form.get('nombre') or '').strip()
+        apellido = (request.form.get('apellido') or '').strip()
+        telefono = (request.form.get('telefono') or '').strip()
 
-        lavador = Usuario(rol='lavador', nombre=nombre, apellido=apellido, telefono=telefono)
+        # ===== INICIO PARCHE: reusar lavador por telefono (evita re-pago) =====
+        # normalizar un poco (opcional, pero ayuda)
+        telefono_norm = ''.join(ch for ch in telefono if ch.isdigit())
+
+        lavador_existente = None
+        if telefono_norm:
+            lavador_existente = Usuario.query.filter_by(
+                rol='lavador',
+                telefono=telefono_norm
+            ).order_by(Usuario.id.desc()).first()
+
+        if lavador_existente:
+            # actualiza datos básicos si vienen (sin romper nada)
+            if nombre: lavador_existente.nombre = nombre
+            if apellido: lavador_existente.apellido = apellido
+            db.session.commit()
+
+            session['lavador_id'] = lavador_existente.id
+            session.permanent = True
+
+            # Si ya está pago y vigente -> directo al dashboard
+            if lavador_existente.fecha_expiracion and lavador_existente.fecha_expiracion > datetime.utcnow():
+                return redirect(url_for('lavador_dashboard'))
+
+            # Si no está vigente -> sigue flujo normal (formulario/pago)
+            return redirect(url_for('lavador_formulario'))
+        # ===== FIN PARCHE =====
+
+        # Si no existe, se crea nuevo (como antes)
+        lavador = Usuario(
+            rol='lavador',
+            nombre=nombre,
+            apellido=apellido,
+            telefono=telefono_norm if telefono_norm else telefono
+        )
         db.session.add(lavador)
         db.session.commit()
 
-        session['lavador_id'] = lavador.id  # Guarda lo correcto
+        session['lavador_id'] = lavador.id
+        session.permanent = True
 
         return redirect(url_for('lavador_formulario'))
 
@@ -652,24 +711,82 @@ def admin_logout():
 
 @app.route('/cancelar_solicitud', methods=["POST"])
 def cancelar_solicitud():
-    cliente_id = session.get("cliente_id")
+    # ===== INICIO PARCHE: cancelar blindado =====
+    cliente_id = session.get("cliente_id") or session.get("usuario_id")
     if not cliente_id:
         return jsonify({'message': 'No hay cliente en sesión'}), 401
+
+    try:
+        cliente_id = int(cliente_id)
+    except Exception:
+        pass
 
     solicitud = Solicitud.query.filter(
         Solicitud.cliente_id == cliente_id,
         Solicitud.estado != 'finalizado'
     ).first()
 
-    if solicitud:
-        solicitud_id = solicitud.id  # ✅ guardar antes de borrar
-        lavador_id = solicitud.lavador_id  # ✅ guardar antes de borrar
+    if not solicitud:
+        return jsonify({'message': 'No se encontró una solicitud activa para cancelar.'}), 404
 
-        lavador = Usuario.query.get(lavador_id) if lavador_id else None
-        cliente = Usuario.query.get(cliente_id)
+    # guardar IDs antes de borrar
+    solicitud_id = solicitud.id
+    lavador_id = solicitud.lavador_id
 
-        db.session.delete(solicitud)
-        db.session.commit()
+    cliente = Usuario.query.get(cliente_id)
+    lavador = Usuario.query.get(lavador_id) if lavador_id else None
+
+    db.session.delete(solicitud)
+    db.session.commit()
+
+    # 1) avisar a TODOS (para limpiar en todos los lavadores/cliente abiertos)
+    try:
+        socketio.emit("solicitud_cancelada", {
+            "cliente_id": cliente_id,
+            "solicitud_id": solicitud_id,
+            "lavador_id": lavador_id
+        }, broadcast=True)
+        
+        print("✅ Emit solicitud_cancelada:", cliente_id, solicitud_id, lavador_id)
+    except Exception as e:
+        print("❌ ERROR emit solicitud_cancelada:", e)
+
+    # 2) notificación al lavador específico (si había uno asignado)
+    try:
+        if lavador_id and lavador:
+            socketio.emit('notificacion_lavador', {
+                'titulo': 'Solicitud cancelada',
+                'mensaje': f'El cliente {cliente.nombre if cliente else "cliente"} canceló la solicitud.'
+            }, room=f"lavador_{lavador_id}")
+    except Exception as e:
+        print("❌ ERROR emit notificacion_lavador:", e)
+
+    return jsonify({'message': 'Solicitud cancelada correctamente.'})
+    # ===== FIN PARCHE =====
+
+        # ===== INICIO PARCHE: avisos socket =====
+        if lavador_id:
+            socketio.emit("solicitud_cancelada", {
+                "cliente_id": cliente_id,
+                "solicitud_id": solicitud_id
+            }, room=f"lavador_{lavador_id}")
+
+        socketio.emit("solicitud_cancelada", {
+            "cliente_id": cliente_id,
+            "solicitud_id": solicitud_id
+        })
+        # ===== FIN PARCHE =====
+
+        if lavador:
+            socketio.emit('notificacion_lavador', {
+                'titulo': 'Solicitud cancelada',
+                'mensaje': f'El cliente {cliente.nombre} canceló la solicitud.'
+            }, room=f"lavador_{lavador_id}" if lavador_id else None)
+
+        return jsonify({'message': 'Solicitud cancelada correctamente.'})
+
+    else:
+        return jsonify({'message': 'No se encontró una solicitud activa para cancelar.'}), 404
 
         # ===== INICIO PARCHE: limpiar solicitud en TODOS los lavadores =====
         try:
@@ -706,7 +823,7 @@ def cancelar_solicitud():
 def terminos():
     return render_template('terminos.html')
 
-@app.route('/')
+@app.route('/splash')
 def splash():
     return render_template('splash.html')
 
