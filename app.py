@@ -711,7 +711,6 @@ def admin_logout():
 
 @app.route('/cancelar_solicitud', methods=["POST"])
 def cancelar_solicitud():
-    # ===== INICIO PARCHE: cancelar blindado =====
     cliente_id = session.get("cliente_id") or session.get("usuario_id")
     if not cliente_id:
         return jsonify({'message': 'No hay cliente en sesión'}), 401
@@ -729,7 +728,6 @@ def cancelar_solicitud():
     if not solicitud:
         return jsonify({'message': 'No se encontró una solicitud activa para cancelar.'}), 404
 
-    # guardar IDs antes de borrar
     solicitud_id = solicitud.id
     lavador_id = solicitud.lavador_id
 
@@ -739,85 +737,28 @@ def cancelar_solicitud():
     db.session.delete(solicitud)
     db.session.commit()
 
-    # 1) avisar a TODOS (para limpiar en todos los lavadores/cliente abiertos)
+    # ✅ AVISO GLOBAL (para limpiar en todos los lavadores y el cliente)
     try:
         socketio.emit("solicitud_cancelada", {
             "cliente_id": cliente_id,
             "solicitud_id": solicitud_id,
             "lavador_id": lavador_id
         }, broadcast=True)
-        
         print("✅ Emit solicitud_cancelada:", cliente_id, solicitud_id, lavador_id)
     except Exception as e:
         print("❌ ERROR emit solicitud_cancelada:", e)
 
-    # 2) notificación al lavador específico (si había uno asignado)
-    try:
-        if lavador_id and lavador:
+    # ✅ NOTIFICACIÓN al lavador asignado (si existía)
+    if lavador_id and lavador:
+        try:
             socketio.emit('notificacion_lavador', {
                 'titulo': 'Solicitud cancelada',
                 'mensaje': f'El cliente {cliente.nombre if cliente else "cliente"} canceló la solicitud.'
             }, room=f"lavador_{lavador_id}")
-    except Exception as e:
-        print("❌ ERROR emit notificacion_lavador:", e)
+        except Exception as e:
+            print("❌ ERROR emit notificacion_lavador:", e)
 
     return jsonify({'message': 'Solicitud cancelada correctamente.'})
-    # ===== FIN PARCHE =====
-
-        # ===== INICIO PARCHE: avisos socket =====
-        if lavador_id:
-            socketio.emit("solicitud_cancelada", {
-                "cliente_id": cliente_id,
-                "solicitud_id": solicitud_id
-            }, room=f"lavador_{lavador_id}")
-
-        socketio.emit("solicitud_cancelada", {
-            "cliente_id": cliente_id,
-            "solicitud_id": solicitud_id
-        })
-        # ===== FIN PARCHE =====
-
-        if lavador:
-            socketio.emit('notificacion_lavador', {
-                'titulo': 'Solicitud cancelada',
-                'mensaje': f'El cliente {cliente.nombre} canceló la solicitud.'
-            }, room=f"lavador_{lavador_id}" if lavador_id else None)
-
-        return jsonify({'message': 'Solicitud cancelada correctamente.'})
-
-    else:
-        return jsonify({'message': 'No se encontró una solicitud activa para cancelar.'}), 404
-
-        # ===== INICIO PARCHE: limpiar solicitud en TODOS los lavadores =====
-        try:
-            socketio.emit(
-                "solicitud_cancelada",
-                {"cliente_id": cliente_id, "solicitud_id": solicitud_id},
-                broadcast=True
-            )
-            print("✅ Emit solicitud_cancelada:", cliente_id, solicitud_id)
-        except Exception as e:
-            print("❌ ERROR emit solicitud_cancelada:", e)
-        # ===== FIN PARCHE =====
-
-        # ===== INICIO PARCHE: notificar al lavador específico (si existe) =====
-        try:
-            if lavador_id:
-                socketio.emit(
-                    "notificacion_lavador",
-                    {
-                        "titulo": "Solicitud cancelada",
-                        "mensaje": f'El cliente {cliente.nombre} canceló la solicitud.'
-                    },
-                    room=f"lavador_{lavador_id}"
-                )
-        except Exception as e:
-            print("❌ ERROR emit notificacion_lavador room:", e)
-        # ===== FIN PARCHE =====
-
-        return jsonify({'message': 'Solicitud cancelada correctamente.'})
-    else:
-        return jsonify({'message': 'No se encontró una solicitud activa para cancelar.'}), 404
 
 @app.route('/terminos')
 def terminos():
