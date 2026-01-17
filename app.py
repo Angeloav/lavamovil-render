@@ -575,6 +575,7 @@ def solicitudes_activas():
 
 @app.route('/aceptar_solicitud')
 def aceptar_solicitud():
+print("🔥 ENTRO A /aceptar_solicitud", request.args, "session.lavador_id=", session.get("lavador_id"))
     if 'lavador_id' not in session:
         return jsonify({'error': 'No autorizado'}), 401
 
@@ -601,6 +602,7 @@ def aceptar_solicitud():
     solicitud.tiene_mensajes_nuevos = True
 
     db.session.commit()
+    print("🔥 COMMIT OK solicitud_id=", solicitud.id, "cliente_id=", solicitud.cliente_id, "lavador_id=", lavador.id)
 
     # ✅ AVISO A TODOS LOS LAVADORES: "YA FUE ACEPTADA, LIMPIEN"
     payload = {
@@ -610,8 +612,9 @@ def aceptar_solicitud():
     }
 
     try:
-        socketio.emit("nueva_solicitud_aceptada", payload, broadcast=True)
-        print("✅ broadcast nueva_solicitud_aceptada:", payload)
+        payload = {'lavador_id': lavador.id, 'cliente_id': solicitud.cliente_id, 'solicitud_id': solicitud.id}
+        socketio.emit("nueva_solicitud_aceptada", payload)  # sin room = a todos en el namespace
+        print("🔥 EMIT nueva_solicitud_aceptada:", payload)
     except Exception as e:
         print("❌ ERROR broadcast nueva_solicitud_aceptada:", e)
 
