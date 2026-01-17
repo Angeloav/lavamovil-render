@@ -8,14 +8,25 @@ from datetime import datetime, timedelta
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
 
+# =========================
 # Configuración inicial de la app
+# =========================
 app = Flask(__name__)
+
 # ===== INICIO PARCHE HTTPS REAL EN RENDER =====
+# Asegura que Flask reconozca HTTPS detrás del proxy (Render)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 # ===== FIN PARCHE HTTPS REAL EN RENDER =====
 
-app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+# Clave secreta
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 
+# ✅ Base dir estable (no instance/, no cwd cambiante)
+basedir = os.path.abspath(os.path.dirname(__file__))
+
+# =========================
+# Sesión persistente
+# =========================
 # ===== INICIO PARCHE SESION PERSISTENTE =====
 app.config["SESSION_PERMANENT"] = True
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)  # ajusta si quieres
@@ -23,34 +34,56 @@ app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)  # ajusta si quier
 
 # ===== INICIO PARCHE COOKIE PERSISTENTE (ANDROID/WEBVIEW) =====
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SECURE"] = True          # Render = https
 app.config["SESSION_COOKIE_SAMESITE"] = "None"      # clave para WebView/redirects
 app.config["SESSION_REFRESH_EACH_REQUEST"] = False  # evita re-escrituras raras
+
+# SECURE por ambiente:
+# - En Render debe ser True (https)
+# - En local suele romper si no estas en https
+is_render = os.environ.get("RENDER", "").lower() == "true"
+is_production = os.environ.get("FLASK_ENV", "").lower() == "production"
+app.config["SESSION_COOKIE_SECURE"] = (is_render or is_production)
 # ===== FIN PARCHE COOKIE PERSISTENTE =====
 
-# ✅ Corrección importante para que la base de datos NO se cree dentro de instance/
-basedir = os.path.abspath(os.path.dirname(__file__))
-app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(basedir, "lavamovil.db")}'
+# =========================
+# Base de datos (SQLite)
+# =========================
+# ✅ Para que la BD NO se cree dentro de instance/
+app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{os.path.join(basedir, 'lavamovil.db')}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# Rutas para cargar archivos
-app.config['UPLOAD_FOLDER'] = 'static/bauches'
+# =========================
+# Rutas para subir archivos
+# =========================
+app.config["UPLOAD_FOLDER"] = "static/bauches"
 
-# Configuración de la sesión
-app.config['SESSION_TYPE'] = 'filesystem'
+# =========================
+# Configuración Flask-Session (filesystem)
+# =========================
+app.config["SESSION_TYPE"] = "filesystem"
 app.config["SESSION_USE_SIGNER"] = True
 app.config["SESSION_COOKIE_NAME"] = "lavamovil_session"
-app.config['SESSION_FILE_DIR'] = os.path.join(os.getcwd(), 'flask_session')
 app.config["SESSION_FILE_THRESHOLD"] = 5000
-# ===== INICIO PARCHE CREAR SESSION DIR =====
-os.makedirs(app.config['SESSION_FILE_DIR'], exist_ok=True)
+
+# ===== INICIO PARCHE PATH SESSION DIR ESTABLE =====
+# NO uses os.getcwd() en Render porque puede variar por worker
+app.config["SESSION_FILE_DIR"] = os.path.join(basedir, "flask_session")
+os.makedirs(app.config["SESSION_FILE_DIR"], exist_ok=True)
 # ===== FIN PARCHE =====
 
-# 🔧 INICIO PARCHE — ORDEN CORRECTO
+# =========================
+# Inicializaciones (orden correcto)
+# =========================
 db = SQLAlchemy(app)
 Session(app)
-socketio = SocketIO(app, async_mode="eventlet", cors_allowed_origins="*", logger=True, engineio_logger=True)
-# 🔧 FIN PARCHE
+
+socketio = SocketIO(
+    app,
+    async_mode="eventlet",
+    cors_allowed_origins="*",
+    logger=True,
+    engineio_logger=True
+)
 
 # Modelos
 class Usuario(db.Model):
