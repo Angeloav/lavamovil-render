@@ -140,7 +140,7 @@
   <script>
     const socket         = io();
     const clienteId      = {{ cliente.id }};
-    let lavadorId      = {{ solicitud_activa.lavador_id if solicitud_activa else 'null' }};
+    const lavadorId      = {{ solicitud_activa.lavador_id if solicitud_activa else 'null' }};
     const tieneSolicitud = {{ 'true' if solicitud_activa else 'false' }};
 
     let map, lavadorMarker, clienteMarker, rutaPolyline;
@@ -157,13 +157,6 @@
       if (data.cliente_id === clienteId && data.mensaje) {
         document.getElementById("mensajeLavador").style.display = "block";
         solicitudAceptada = true;
-
-        // ✅ Si el server manda el lavador_id, lo guardamos para poder trazar ruta sin recargar
-        if (data.lavador_id) {
-          lavadorId = data.lavador_id;
-          socket.emit("unirse_sala_privada", { cliente_id: clienteId, lavador_id: lavadorId });
-          iniciarMovimientoCarritoCamioncito();
-        }
       }
     });
 
@@ -491,7 +484,48 @@
     telefono: "{{ cliente.telefono }}"
   };
 
+<script>
+// Registra globalmente la función para que el mapa cargue bien
+window.initMap = initMap;
 </script>
+
+<script async defer
+  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBmVCNKb_sjx-vE5b1YoJpPUgm8Ub09ElE&callback=initMap">
+
+if (lavadorId && lavadorId !== "none") {
+  setInterval(() => {
+    obtenerUbicacionLavador();
+  }, 5000);
+}
+
+</script>
+<!-- 🔧 INICIO PARCHE: definir callbacks de geolocalización -->
+<script>
+function guardarUbicacionAlCargar(position){
+  try{
+    const lat = position.coords.latitude;
+    const lng = position.coords.longitude;
+    console.log("📍 Cliente ubicación:", lat, lng);
+    // Ajusta este endpoint si tu backend usa otro:
+    fetch("/actualizar_ubicacion_cliente", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      credentials: "include",
+      body: JSON.stringify({ latitud: lat, longitud: lng })
+    }).catch(()=>{});
+  }catch(e){ console.warn("guardarUbicacionAlCargar error:", e); }
+}
+function errorUbicacion(err){
+  console.warn("⚠️ Geoloc:", err && err.message ? err.message : err);
+}
+
+// Si ya llamas getCurrentPosition en otro <script>, déjalo.
+// Si no, activa esta línea:
+if (navigator.geolocation) {
+  navigator.geolocation.getCurrentPosition(guardarUbicacionAlCargar, errorUbicacion);
+}
+</script>
+<!-- 🔧 FIN PARCHE -->
 
 </body>
 </html>
