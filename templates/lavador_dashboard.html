@@ -4,28 +4,37 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Panel del Lavador - LavaMovil</title>
+
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-  <!-- 🔧 INICIO PARCHE: definir clienteId -->
-  <script>
-    const clienteIdEl = document.getElementById("clienteData");
-    let clienteId = clienteIdEl ? clienteIdEl.dataset.id : "none";
-  </script>
-  <!-- 🔧 FIN PARCHE -->
 
   <style>
     body { font-family: 'Segoe UI', sans-serif; background-color: #121212; color: #ffffff; margin: 0; padding: 0; text-align: center; }
-    h1 { color: #ffffff; font-size: 24px; margin-top: 20px; } p { color: #ffffff; } #estado { color: #ffffff; }
-    #map { width: 90%; max-width: 360px; height: 250px; border-radius: 20px; margin: 20px auto; border: 1px solid #333; box-shadow: 0 4px 10px rgba(0,0,0,0.4); }
-    button { display: flex; align-items: center; justify-content: center; width: 85%; max-width: 320px; margin: 10px auto; padding: 14px; border: 2px solid #aaa; border-radius: 30px; font-size: 16px; font-weight: 600; color: white; cursor: pointer; transition: all 0.3s ease; box-sizing: border-box; }
+    h1 { color: #ffffff; font-size: 24px; margin-top: 20px; }
+    p  { color: #ffffff; }
+    #estado { margin-bottom: 10px; font-size: 15px; color: #ffffff; }
+
+    #map {
+      width: 90%; max-width: 360px; height: 250px;
+      border-radius: 20px; margin: 20px auto;
+      border: 1px solid #333; box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+    }
+
+    button {
+      display: flex; align-items: center; justify-content: center;
+      width: 85%; max-width: 320px; margin: 10px auto; padding: 14px;
+      border: 2px solid #aaa; border-radius: 30px; font-size: 16px; font-weight: 600;
+      color: white; cursor: pointer; transition: all 0.3s ease; box-sizing: border-box;
+    }
 
     .activo { background-color: #28a745; }
     .inactivo { background-color: #dc3545; }
     .cerrar { background-color: #343a40; }
     .vercal { background-color: #007bff; }
     .activo:hover { background-color: #1c7c31; }
-    .inactivo:hover { background-color: #a71d2a; }    
+    .inactivo:hover { background-color: #a71d2a; }
     .cerrar:hover { background-color: #1d2124; }
     .vercal:hover { background-color: #0056b3; }
+
     #notificacion {
       display: none;
       background-color: #ffc107;
@@ -35,8 +44,14 @@
       margin-bottom: 10px;
       font-weight: bold;
     }
-    #estado { margin-bottom: 10px; font-size: 15px; color: #ffffff; }
-    .calificacion-box { background-color: #1e1e1e; border: 1px solid #555; margin: 20px auto; padding: 15px; border-radius: 12px; max-width: 360px; text-align: left; display: none; color: #ffffff; box-sizing: border-box; width: 85%; }
+
+    .calificacion-box {
+      background-color: #1e1e1e; border: 1px solid #555;
+      margin: 20px auto; padding: 15px; border-radius: 12px;
+      max-width: 360px; text-align: left; display: none; color: #ffffff;
+      box-sizing: border-box; width: 85%;
+    }
+
     .aceptar {
       background-color: #28a745;
       color: white;
@@ -48,23 +63,59 @@
       cursor: pointer;
       margin-top: 8px;
     }
-    .aceptar:hover {
-      background-color: #1c7c31;
+    .aceptar:hover { background-color: #1c7c31; }
+
+    select, textarea {
+      width: 100%; max-width: 100%;
+      padding: 12px; margin-top: 10px;
+      border-radius: 8px; border: 1px solid #555;
+      font-size: 14px; background-color: #2a2a2a; color: #ffffff;
+      box-sizing: border-box;
     }
-    select, textarea { width: 100%; max-width: 100%; padding: 12px; margin-top: 10px; border-radius: 8px; border: 1px solid #555; font-size: 14px; background-color: #2a2a2a; color: #ffffff; box-sizing: border-box; }
   </style>
+
+  <!-- clienteId seguro (sin tocar DOM antes de tiempo) -->
+  <script>
+    let clienteId = "none";
+
+    function refrescarClienteIdDesdeDOMyLS() {
+      try {
+        const el = document.getElementById("clienteData");
+        if (el && el.dataset && el.dataset.id) clienteId = el.dataset.id;
+
+        if (!clienteId || clienteId === "none") {
+          const guardado = localStorage.getItem("lm_cliente_activo");
+          if (guardado) clienteId = guardado;
+        }
+
+        if (clienteId && clienteId !== "none") {
+          localStorage.setItem("lm_cliente_activo", String(clienteId));
+          if (el) el.dataset.id = String(clienteId);
+        }
+
+        const hidden = document.getElementById("clienteIdHidden");
+        if (hidden) hidden.value = (clienteId && clienteId !== "none") ? String(clienteId) : "";
+      } catch (e) {}
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      refrescarClienteIdDesdeDOMyLS();
+    });
+  </script>
 </head>
+
 <body>
 
 {% include 'notificaciones.html' %}
 
 <h1>Bienvenido Lavador {{ lavador.nombre }} {{ lavador.apellido }}</h1>
 <p>ID de Usuario: {{ lavador.id }}</p>
+
 <div id="estado">Estado: <span id="estadoServicio">{{ lavador.estado.capitalize() }}</span></div>
+
 <div id="clienteData" data-id="{{ cliente.id if cliente else 'none' }}"></div>
 <div id="solicitudAceptada" data-estado="{{ 'true' if solicitud_aceptada else 'false' }}"></div>
 <div id="estadoSolicitud" data-aceptada="{{ 'true' if solicitud_activa and solicitud_activa.estado == 'aceptado' else 'false' }}"></div>
-
 
 <div id="notificacion">¡Nueva solicitud recibida!</div>
 <div id="map"></div>
@@ -76,191 +127,360 @@
 
 <form action="/chat" method="get">
   <input type="hidden" name="rol" value="lavador">
+  <input type="hidden" name="cliente_id" id="clienteIdHidden" value="">
   <button id="botonChat" type="submit" style="background-color: #6c63ff; color: white; padding: 10px; border-radius: 10px;">
     💬 Chat con Cliente
   </button>
 </form>
 
-<script>
-function abrirChat() {
-  const lavadorId = {{ lavador.id }};
-  if (clienteId !== "none" ) {
-    window.location.href = `/chat_privado/${clienteId}/${lavadorId}`;
-  } else {
-    alert("❌ No hay una solicitud activa.");
-  }
-}
-</script>
-
 <div id="solicitudes"></div>
 <div id="calificaciones" class="calificacion-box"></div>
 <audio id="sonidoMensaje" src="/static/sounds/nuevo_mensaje.mp3"></audio>
 
-<!-- 🔧 INICIO PARCHE FRONT -->
 <script>
-  const socket = io(window.location.origin, {
+  // ====== IDs ======
+  const lavadorId = {{ lavador.id|tojson }};
+
+  // ====== Socket (UNA sola instancia) ======
+  window.socket = io(window.location.origin, {
     transports: ["websocket","polling"],
     reconnection: true,
     reconnectionAttempts: 10
   });
 
-  const lavadorId = {{ lavador.id|tojson }};
+  // join sala privada (convención actual)
+  function unirseSalaPrivada() {
+    try {
+      window.socket.emit("unirse_sala_privada", { lavador_id: lavadorId });
+    } catch (e) {}
+  }
 
-  socket.on("connect", () => {
-    console.log("🟢 Socket conectado:", socket.id);
-    socket.emit("unirse_sala_privada", { lavador_id: lavadorId });
-  });
+  // (opcional) join sala de chat si tu backend lo soporta
+  let yaUnidoChat = false;
+  function joinSalaChatSiListo() {
+    refrescarClienteIdDesdeDOMyLS();
+    if (!clienteId || clienteId === "none") return;
 
-  socket.on("union_confirmada", (d) => {
-    const n = document.getElementById("notificacion");
-    if (n) {
-      n.style.display = "block";
-      n.innerText = "Conectado a " + d.sala;  // <- clave correcta
-      setTimeout(() => {
-        n.style.display = "none";
-        n.innerText = "¡Nueva solicitud recibida!";
-      }, 2000);
+    const C = Number(clienteId);
+    const L = Number(lavadorId);
+    if (!Number.isFinite(C) || !Number.isFinite(L)) return;
+
+    const sala = `chat_${Math.min(C, L)}_${Math.max(C, L)}`;
+    if (!yaUnidoChat) {
+      try { window.socket.emit("unirse_chat", { sala }); } catch (e) {}
+      yaUnidoChat = true;
     }
+  }
+
+  function rejoinTodo() {
+    unirseSalaPrivada();
+    yaUnidoChat = false;
+    joinSalaChatSiListo();
+  }
+
+  window.socket.on("connect", () => {
+    rejoinTodo();
   });
 
-  socket.on("nueva_solicitud", (data) => {
-    console.log("📨 Solicitud recibida en lavador:", data);
-    // aquí tu UI/sonido existente
+  window.socket.on("disconnect", () => {
+    yaUnidoChat = false;
   });
+
+  window.addEventListener("focus", () => rejoinTodo());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") rejoinTodo();
+  });
+  window.addEventListener("pageshow", () => rejoinTodo());
+
+  // ====== Nueva solicitud ======
+  window.socket.on("nueva_solicitud", (data) => {
+    try { console.log("📨 nueva_solicitud:", data); } catch (e) {}
+
+    // si viene lavador_id, filtramos
+    if (data && data.lavador_id && String(data.lavador_id) !== String(lavadorId)) return;
+
+    if (data && data.cliente_id) {
+      clienteId = String(data.cliente_id);
+      try { localStorage.setItem("lm_cliente_activo", String(clienteId)); } catch (e) {}
+      const cd = document.getElementById("clienteData");
+      if (cd) cd.dataset.id = String(clienteId);
+
+      const hidden = document.getElementById("clienteIdHidden");
+      if (hidden) hidden.value = String(clienteId);
+
+      yaUnidoChat = false;
+      joinSalaChatSiListo();
+    }
+
+    // UI
+    const cont = document.getElementById("solicitudes");
+    const notif = document.getElementById("notificacion");
+    if (notif) notif.style.display = "block";
+    if (!cont) return;
+
+    cont.innerHTML = "";
+
+    const wrap = document.createElement("div");
+
+    const strong = document.createElement("strong");
+    strong.textContent = `${data.nombre || ""} ${data.apellido || ""}`.trim() || "Cliente";
+    wrap.appendChild(strong);
+    wrap.appendChild(document.createElement("br"));
+
+    if (data.telefono) {
+      wrap.appendChild(document.createTextNode(`Tel: ${data.telefono}`));
+      wrap.appendChild(document.createElement("br"));
+    }
+
+    if (data.solicitud_id) {
+      const btn = document.createElement("button");
+      btn.id = `botonAceptar_${data.solicitud_id}`;
+      btn.className = "aceptar";
+      btn.type = "button";
+      btn.textContent = "Aceptar";
+      btn.addEventListener("click", () => aceptar(data.solicitud_id));
+      wrap.appendChild(btn);
+    }
+
+    cont.appendChild(wrap);
+  });
+
+  // ====== Cuando el cliente cancela la solicitud ======
+  window.socket.on("solicitud_cancelada", (data) => {
+    try {
+      const cid = data && data.cliente_id ? String(data.cliente_id) : null;
+      const actual = (clienteId && clienteId !== "none") ? String(clienteId) : null;
+      const guardado = localStorage.getItem("lm_cliente_activo");
+
+      if (!cid || cid === actual || cid === String(guardado)) {
+        const notif = document.getElementById("notificacion");
+        if (notif) notif.style.display = "none";
+
+        const cont = document.getElementById("solicitudes");
+        if (cont) cont.innerHTML = "";
+
+        clienteId = "none";
+        const cd = document.getElementById("clienteData");
+        if (cd) cd.dataset.id = "none";
+
+        try { localStorage.removeItem("lm_cliente_activo"); } catch(e) {}
+
+        const hidden = document.getElementById("clienteIdHidden");
+        if (hidden) hidden.value = "";
+
+        if (rutaPolyline) { rutaPolyline.setMap(null); rutaPolyline = null; }
+        if (clienteMarker) { clienteMarker.setMap(null); clienteMarker = null; }
+        yaUnidoChat = false;
+      }
+    } catch(e) {}
+  });
+
+  // ====== Cuando el cliente finaliza / califica ======
+  window.socket.on("servicio_finalizado", (data) => {
+    try {
+      const cid = data && data.cliente_id ? String(data.cliente_id) : null;
+      const actual = (clienteId && clienteId !== "none") ? String(clienteId) : null;
+      const guardado = localStorage.getItem("lm_cliente_activo");
+
+      if (!cid || cid === actual || cid === String(guardado)) {
+        const notif = document.getElementById("notificacion");
+        if (notif) notif.style.display = "none";
+
+        const cont = document.getElementById("solicitudes");
+        if (cont) cont.innerHTML = "";
+
+        clienteId = "none";
+        const cd = document.getElementById("clienteData");
+        if (cd) cd.dataset.id = "none";
+
+        try { localStorage.removeItem("lm_cliente_activo"); } catch(e) {}
+
+        const hidden = document.getElementById("clienteIdHidden");
+        if (hidden) hidden.value = "";
+
+        if (rutaPolyline) { rutaPolyline.setMap(null); rutaPolyline = null; }
+        if (clienteMarker) { clienteMarker.setMap(null); clienteMarker = null; }
+
+        const cal = document.getElementById("calificaciones");
+        if (cal) cal.style.display = "none";
+        yaUnidoChat = false;
+      }
+    } catch(e) {}
+  });
+
+  // Cuando otro lavador acepta: limpiar esta solicitud aquí
+  window.socket.on("nueva_solicitud_aceptada", (data) => {
+    if (!data) return;
+
+    // si fui yo el que aceptó, no limpio
+    if (String(data.lavador_id) === String(lavadorId)) return;
+
+    const clienteActual = (clienteId && clienteId !== "none") ? String(clienteId) : null;
+    let clienteGuardado = null;
+    try { clienteGuardado = localStorage.getItem("lm_cliente_activo"); } catch (e) {}
+
+    if (String(data.cliente_id) === clienteActual || String(data.cliente_id) === String(clienteGuardado)) {
+      const notif = document.getElementById("notificacion");
+      if (notif) notif.style.display = "none";
+
+      const cont = document.getElementById("solicitudes");
+      if (cont) cont.innerHTML = "";
+
+      clienteId = "none";
+      const cd = document.getElementById("clienteData");
+      if (cd) cd.dataset.id = "none";
+
+      try { localStorage.removeItem("lm_cliente_activo"); } catch (e) {}
+
+      const hidden = document.getElementById("clienteIdHidden");
+      if (hidden) hidden.value = "";
+    
+
+      if (rutaPolyline) { rutaPolyline.setMap(null); rutaPolyline = null; }
+      if (clienteMarker) { clienteMarker.setMap(null); clienteMarker = null; }
+      yaUnidoChat = false;
+}
+  });
+
+  // Mensajes privados: burbuja + sonido
+  window.socket.on("recibir_mensaje_privado", (data) => {
+    try {
+      const botonChat = document.getElementById("botonChat");
+      if (botonChat && !document.getElementById("burbujaChat")) {
+        const burbuja = document.createElement("span");
+        burbuja.id = "burbujaChat";
+        burbuja.textContent = "🔴";
+        burbuja.style.marginLeft = "5px";
+        botonChat.appendChild(burbuja);
+      }
+      const sonido = document.getElementById("sonidoMensaje");
+      if (sonido) sonido.play().catch(() => {});
+    } catch (e) {}
+  });
+
+  // Mantener sesión viva
+  try {
+    setInterval(() => {
+      fetch("/ping", { method: "GET", credentials: "include", cache: "no-store" }).catch(()=>{});
+    }, 120000);
+  } catch (e) {}
 </script>
-<!-- 🔧 FIN PARCHE FRONT -->
 
 <script>
-let map, lavadorMarker, clienteMarker, rutaPolyline;
+  // ====== Mapa ======
+  let map, lavadorMarker, clienteMarker, rutaPolyline;
+  let watchId = null;
 
-function actualizarUbicacion(lat, lng) {
-  console.log("📡 Ubicación del lavador lista:", lat, lng);
+  function actualizarUbicacion(lat, lng) {
+    // socket
+    try {
+      window.socket.emit("ubicacion_lavador", {
+        lavador_id: lavadorId,
+        latitud: lat,
+        longitud: lng
+      });
+    } catch (e) {}
 
-  socket.emit("ubicacion_lavador", {
-    lavador_id: lavadorId,
-    latitud: lat,
-    longitud: lng
-  });
+    // backend
+    fetch(`/actualizar_ubicacion_lavador?lat=${lat}&lng=${lng}`, {
+      credentials: "include"
+    }).catch(() => {});
+  }
 
-  // ✅ GUARDAR EN EL BACKEND AHORA MISMO
-  fetch(`/actualizar_ubicacion_lavador?lat=${lat}&lng=${lng}`, {
-    credentials: 'include'
-  })
-  .then(res => res.json())
-  .then(data => console.log("📤 Lavador envió ubicación al servidor:", lat, lng))
-  .catch(err => console.warn("❌ Error guardando ubicación:", err));
-}
+  function trazarRutaSiSePuede() {
+    if (!clienteMarker || !lavadorMarker || !map) return;
 
-function obtenerUbicacionCliente() {
-  if (!clienteId || clienteId === "none") return;
-
-  fetch(`/obtener_ubicacion_cliente?user_id=${clienteId}`, {
-    credentials: 'include'
-  })
-  .then(res => res.json())
-  .then(data => {
-    console.log("📍 Datos recibidos del cliente:", data);
-
-    if (data.lat && data.lng) {
-      const clientePos = { lat: data.lat, lng: data.lng };
-      if (!clienteMarker) {
-        clienteMarker = new google.maps.Marker({
-          position: clientePos,
-          map: map,
-          title: "Cliente",
-          icon: {
-            url: "/static/icons/carrito_icono.png",
-            scaledSize: new google.maps.Size(50, 50)
-          }
-        });
-      } else {
-        clienteMarker.setPosition(clientePos);
-      }
-
-      if (clienteMarker && lavadorMarker) {
-        if (rutaPolyline) rutaPolyline.setMap(null);
-        rutaPolyline = new google.maps.Polyline({
-          path: [lavadorMarker.getPosition(), clienteMarker.getPosition()],
-          geodesic: true,
-          strokeColor: "#00bfff",
-          strokeOpacity: 1.0,
-          strokeWeight: 3,
-          map: map
-        });
-      }
-    }
-  })
-  .catch(err => {
-    console.warn("❌ Error al obtener ubicación del cliente:", err);
-  });
-}
-
-function initMap() {
-  map = new google.maps.Map(document.getElementById('map'), {
-    center: { lat: 19.4326, lng: -99.1332 },
-    zoom: 15
-  });
-
-  const permisoUbicacion = confirm("🚗 LavaMovil necesita acceso a tu ubicación para encontrar al cliente. ¿Deseas permitirlo?");
-
-  if (!permisoUbicacion) {
-    console.warn("⚠️ Usuario no permitió ubicación, usando ubicación genérica.");
-    const fallback = { lat: 19.4326, lng: -99.1332 };
-    lavadorMarker = new google.maps.Marker({
-      position: fallback,
-      map: map,
-      title: "Ubicación simulada",
-      icon: {
-        url: "/static/icons/camioncito_icono.png",
-        scaledSize: new google.maps.Size(50, 50)
-      }
+    if (rutaPolyline) rutaPolyline.setMap(null);
+    rutaPolyline = new google.maps.Polyline({
+      path: [lavadorMarker.getPosition(), clienteMarker.getPosition()],
+      geodesic: true,
+      strokeColor: "#00bfff",
+      strokeOpacity: 1.0,
+      strokeWeight: 3,
+      map: map
     });
-    map.setCenter(fallback);
-    return;
   }
 
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(position => {
-      console.log("📍 GPS OK:", position.coords.latitude, position.coords.longitude);
-      const posicion = { lat: position.coords.latitude, lng: position.coords.longitude };
+  function obtenerUbicacionCliente() {
+    refrescarClienteIdDesdeDOMyLS();
+    if (!clienteId || clienteId === "none") return;
 
-      lavadorMarker = new google.maps.Marker({
-        position: posicion,
-        map: map,
-        title: "Tu ubicación",
-        icon: {
-          url: "/static/icons/camioncito_icono.png",
-          scaledSize: new google.maps.Size(50, 50)
+    fetch(`/obtener_ubicacion_cliente?user_id=${clienteId}`, { credentials: "include" })
+      .then(res => res.json())
+      .then(data => {
+        if (!data || typeof data.lat !== "number" || typeof data.lng !== "number") return;
+
+        const pos = { lat: data.lat, lng: data.lng };
+
+        if (!clienteMarker) {
+          clienteMarker = new google.maps.Marker({
+            position: pos,
+            map: map,
+            title: "Cliente",
+            icon: { url: "/static/icons/carrito_icono.png", scaledSize: new google.maps.Size(50, 50) }
+          });
+        } else {
+          clienteMarker.setPosition(pos);
         }
-      });
 
-      map.setCenter(posicion);
-      actualizarUbicacion(posicion.lat, posicion.lng);
-      obtenerUbicacionCliente();
-
-    }, error => {
-      console.warn("❌ Error GPS:", error.code, error.message);
-
-      const simulacion = { lat: 18.4861, lng: -69.9312 };
-
-      lavadorMarker = new google.maps.Marker({
-        position: simulacion,
-        map: map,
-        title: "Ubicación simulada",
-        icon: {
-          url: "/static/icons/camioncito_icono.png",
-          scaledSize: new google.maps.Size(50, 50)
-        }
-      });
-      map.setCenter(simulacion);
-
-      actualizarUbicacion(simulacion.lat, simulacion.lng);
-      obtenerUbicacionCliente();
-    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+        trazarRutaSiSePuede();
+      })
+      .catch(() => {});
   }
-} // ✅ FIN de initMap
-window.initMap = initMap;  // ✅ Esto registra la función globalmente
 
+  function iniciarGPSLavador() {
+    if (!navigator.geolocation) return;
+
+    if (watchId) {
+      try { navigator.geolocation.clearWatch(watchId); } catch (e) {}
+      watchId = null;
+    }
+
+    watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const nuevaPos = { lat, lng };
+
+        if (!lavadorMarker) {
+          lavadorMarker = new google.maps.Marker({
+            position: nuevaPos,
+            map: map,
+            title: "Tu ubicación",
+            icon: { url: "/static/icons/camioncito_icono.png", scaledSize: new google.maps.Size(50, 50) }
+          });
+        } else {
+          lavadorMarker.setPosition(nuevaPos);
+        }
+
+        map.setCenter(nuevaPos);
+        actualizarUbicacion(lat, lng);
+        trazarRutaSiSePuede();
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 }
+    );
+  }
+
+  function initMap() {
+    map = new google.maps.Map(document.getElementById("map"), {
+      center: { lat: 18.4861, lng: -69.9312 }, // fallback RD
+      zoom: 15
+    });
+
+    refrescarClienteIdDesdeDOMyLS();
+
+    // trae cliente al iniciar
+    obtenerUbicacionCliente();
+    setInterval(obtenerUbicacionCliente, 8000);
+
+    // permiso ubicación (desactivado en móvil por cierres)
+     //const permiso = confirm("🚗 LavaMovil necesita acceso a tu ubicación para encontrar al cliente. ¿Deseas permitirlo?");
+     //if (permiso) iniciarGPSLavador();
+     iniciarGPSLavador();
+  }
+
+  window.initMap = initMap;
 </script>
 
 <script async defer
@@ -268,251 +488,99 @@ window.initMap = initMap;  // ✅ Esto registra la función globalmente
 </script>
 
 <script>
-function iniciarMovimientoCarritoCamioncito() {
-  setInterval(() => {
-    actualizarUbicacionLavador();
-    obtenerUbicacionCliente();
-  }, 5000);
-}
-
-socket.on("iniciar_movimiento", (data) => {
-  console.log("📡 Movimiento recibido por el lavador:", data);
-  if (
-    data &&
-    data.cliente_id == clienteId &&
-    data.lavador_id == lavadorId
-  ) {
-    console.log("✅ IDs coinciden, iniciando movimiento...");
-    iniciarMovimientoCarritoCamioncito();
-  }
-});
-
-function obtenerUbicacionLavador() {
-  if (!map) {
-    console.warn("⚠️ Mapa aún no está listo.");
-    return;
-  }
-
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(pos => {
-      console.log("📍 Lavador detectado en:", pos.coords.latitude, pos.coords.longitude);
-
-      const posicionLavador = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-
-      if (!lavadorMarker) {
-        lavadorMarker = new google.maps.Marker({
-          position: posicionLavador,
-          map: map,
-          title: "Lavador",
-          icon: {
-            url: "/static/icons/camioncito_icono.png",
-            scaledSize: new google.maps.Size(50, 50)
-          }
-        });
-      } else {
-        lavadorMarker.setPosition(posicionLavador);
-      }
-
-      map.setCenter(posicionLavador);
-
-      // 🔵 Trazar línea si el cliente está presente
-      if (clienteMarker) {
-        if (rutaPolyline) rutaPolyline.setMap(null);
-        rutaPolyline = new google.maps.Polyline({
-          path: [lavadorMarker.getPosition(), clienteMarker.getPosition()],
-          geodesic: true,
-          strokeColor: "#00bfff",
-          strokeOpacity: 1.0,
-          strokeWeight: 3,
-          map: map
-        });
-      }
-
-      // Enviar ubicación al servidor si es necesario
-      actualizarUbicacion(pos.coords.latitude, pos.coords.longitude);
-
-    }, error => {
-      console.warn("❌ Error obteniendo ubicación del lavador:", error.message);
-    }, { enableHighAccuracy: true, timeout: 10000 });
-
-  } else {
-    console.warn("⚠️ El navegador no soporta geolocalización.");
-  }
-}
-
-let intervaloCliente = null;
-
-socket.on("nueva_solicitud", function(data) {
-  console.log("📨 Solicitud recibida del cliente:", data);
-
-  if (data.lavador_id == lavadorId) {
-    console.log("✅ Esta solicitud es para mí, me uno a mi sala privada");
-    // 🔄 Actualizar clienteId dinámicamente al recibir solicitud
-    document.getElementById("clienteData").dataset.id = data.cliente_id;
-    clienteId = data.cliente_id;
-    console.log("🔄 clienteId actualizado dinámicamente:", clienteId);
-
-    socket.emit("unirse_sala_privada", {
-      lavador_id: lavadorId
-    });
-
-    document.getElementById("solicitudes").innerHTML = ""; // Limpia solicitudes anteriores
-    const div = document.createElement('div');
-    div.innerHTML = `
-      <div><strong>${data.nombre} ${data.apellido}</strong><br>
-      Tel: ${data.telefono}<br>
-      <button id="botonAceptar_${data.solicitud_id}" class="aceptar" onclick="aceptar(${data.solicitud_id})">Aceptar</button></div>`;
-    document.getElementById("solicitudes").appendChild(div);
-    document.getElementById("notificacion").style.display = "block";
-
-    // ✅ Solo inicia si no está ya corriendo
-    if (!intervaloCliente) {
-      intervaloCliente = setInterval(() => {
-        if (clienteId !== "none") {
-          obtenerUbicacionCliente();
-        } else {
-          console.warn("⚠️ clienteId inválido:", clienteId);
-        }
-      }, 5000);
-    }
-  }
-});
-
-</script>
-
-<script>
-function aceptar(id) { 
-  fetch(`/aceptar_solicitud?solicitud_id=${id}`)
-    .then(res => res.json())
-    .then(res => {
-      alert(res.message || res.error);
-
-      const botonAceptar = document.getElementById(`botonAceptar_${id}`);
-      if (botonAceptar) {
-        botonAceptar.style.display = "none";
-      }
-
-      iniciarMovimientoManual(id);  // Sigue normal
-      // ❌ location.reload(); → ELIMINADO
-    });
-}
-
-function iniciarMovimientoManual(solicitudId) {
-  fetch(`/obtener_ids_por_solicitud?solicitud_id=${solicitudId}`)
-    .then(res => res.json())
-    .then(data => {
-      const clienteId = data.cliente_id;
-      const lavadorId = data.lavador_id;
-
-      // Emitimos el evento al cliente
-      socket.emit("iniciar_movimiento", {
-        cliente_id: clienteId,
-        lavador_id: lavadorId
-      });
-
-      console.log("📤 Movimiento iniciado para cliente:", clienteId, "lavador:", lavadorId);
+  // ====== Aceptar solicitud ======
+  function aceptar(id) {
+    fetch(`/aceptar_solicitud?solicitud_id=${id}`, {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store"
     })
-    .catch(err => {
-      console.error("❌ Error al iniciar movimiento:", err);
-    });
-}
+    .then(res => res.ok ? res.json() : Promise.reject(res))
+    .then(res => {
+      if (res && (res.message || res.error)) alert(res.message || res.error);
 
-function cambiarEstado(estado) {
-  fetch('/cambiar_estado', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ estado: estado })
-  })
-  .then(response => {
-    if (response.ok) {
+      const btn = document.getElementById(`botonAceptar_${id}`);
+      if (btn) btn.style.display = "none";
+
+      if (res && res.cliente_id) {
+        clienteId = String(res.cliente_id);
+        try { localStorage.setItem("lm_cliente_activo", String(clienteId)); } catch (e) {}
+
+        const cd = document.getElementById("clienteData");
+        if (cd) cd.dataset.id = String(clienteId);
+
+        const hidden = document.getElementById("clienteIdHidden");
+        if (hidden) hidden.value = String(clienteId);
+
+        yaUnidoChat = false;
+        joinSalaChatSiListo();
+      }
+
+      // por seguridad, rejoin sala privada
+      unirseSalaPrivada();
+
+      // inicia movimiento (si tu backend lo usa)
+      iniciarMovimientoManual(id);
+    })
+    .catch(err => console.error("✘ aceptar_solicitud:", err.status || err, err.statusText || ""));
+  }
+  window.aceptar = aceptar;
+
+  function iniciarMovimientoManual(solicitudId) {
+    fetch(`/obtener_ids_por_solicitud?solicitud_id=${solicitudId}`, { credentials: "include" })
+      .then(res => res.json())
+      .then(data => {
+        if (!data) return;
+        const cid = data.cliente_id;
+        const lid = data.lavador_id;
+
+        if (cid) {
+          clienteId = String(cid);
+          try { localStorage.setItem("lm_cliente_activo", String(clienteId)); } catch (e) {}
+        }
+
+        try {
+          window.socket.emit("iniciar_movimiento", { cliente_id: cid, lavador_id: lid });
+        } catch (e) {}
+      })
+      .catch(() => {});
+  }
+
+  // ====== Botones ======
+  function cambiarEstado(estado) {
+    fetch("/cambiar_estado", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ estado }),
+      credentials: "include",
+      cache: "no-store"
+    })
+    .then(r => {
+      if (!r.ok) throw new Error("HTTP " + r.status);
       document.getElementById("estadoServicio").innerText = estado.charAt(0).toUpperCase() + estado.slice(1);
-      alert("Estado actualizado a: " + estado);
-    } else {
-      alert("❌ Error al cambiar el estado.");
-    }
-  });
-}
-
-function cerrarSesion() {
-  window.location.href = "/logout";
-}
-
-function volverInicio() {
-  window.location.href = "/";
-}
-
-function verCalificaciones() {
-  fetch(`/ver_calificaciones/${lavadorId}`)
-    .then(response => response.json())
-    .then(data => {
-      const div = document.getElementById("calificaciones");
-      div.innerHTML = "<h3>Calificaciones</h3>";
-      if (data.length === 0) {
-        div.innerHTML += "<p>No tienes calificaciones aún.</p>";
-      } else {
-        data.forEach(item => {
-          div.innerHTML += `<p><strong>${item.nombre} ${item.apellido}:</strong> ${item.calificacion} - ${item.comentario}</p>`;
-        });
-      }
-      div.style.display = "block";
-    });
-}
-</script>
-
-<script>
-socket.emit("unirse_sala_mensajes", { user_id: lavadorId });
-socket.on("nuevo_mensaje_directo", function(data) {
-  if (data.destinatario_id === lavadorId) {
-    const botonChat = document.getElementById("botonChat");
-    if (botonChat && !document.getElementById("burbujaChat")) {
-      const burbuja = document.createElement("span");
-      burbuja.id = "burbujaChat";
-      burbuja.textContent = "🔴";
-      burbuja.style.marginLeft = "5px";
-      botonChat.appendChild(burbuja);
-    }
-    const sonido = document.getElementById("sonidoMensaje");
-    if (sonido) sonido.play();
+    })
+    .catch(() => alert("❌ Error al cambiar el estado."));
   }
-});
 
-document.addEventListener('click', () => {
-  const sonido = document.getElementById("sonidoMensaje");
-  if (sonido) sonido.play().catch(() => {});
-}, { once: true });
+  function cerrarSesion() { window.location.href = "/logout"; }
 
-setInterval(() => {
-  fetch("/verificar_mensajes_nuevos")
-    .then(res => res.json())
-    .then(data => {
-      if (data.mensajes_nuevos && !document.getElementById("burbujaChat")) {
-        const burbuja = document.createElement("span");
-        burbuja.textContent = "🔴";
-        burbuja.id = "burbujaChat";
-        burbuja.style.marginLeft = "5px";
-        const boton = document.getElementById("botonChat");
-        if (boton) boton.appendChild(burbuja);
-      }
-    });
-}, 5000);
-    
-socket.on("actualizar_ubicacion_cliente", (data) => {
-  const posicionCliente = { lat: data.latitud, lng: data.longitud };
-
-  if (!clienteMarker) {
-    clienteMarker = new google.maps.Marker({
-      position: posicionCliente,
-      map: map,
-      title: "Cliente",
-      icon: {
-        url: "/static/icons/carrito_icono.png",
-        scaledSize: new google.maps.Size(40, 40)
-      }
-    });
-  } else {
-    clienteMarker.setPosition(posicionCliente);
+  function verCalificaciones() {
+    fetch(`/ver_calificaciones/${lavadorId}`)
+      .then(r => r.json())
+      .then(data => {
+        const div = document.getElementById("calificaciones");
+        div.innerHTML = "<h3>Calificaciones</h3>";
+        if (!data || data.length === 0) {
+          div.innerHTML += "<p>No tienes calificaciones aún.</p>";
+        } else {
+          data.forEach(item => {
+            div.innerHTML += `<p><strong>${item.nombre} ${item.apellido}:</strong> ${item.calificacion} - ${item.comentario}</p>`;
+          });
+        }
+        div.style.display = "block";
+      })
+      .catch(() => {});
   }
-});
 </script>
 
 </body>
