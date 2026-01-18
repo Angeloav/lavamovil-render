@@ -375,51 +375,64 @@ def actualizar_ubicacion_cliente():
 
 @app.route('/solicitar_servicio', methods=['POST'])
 def solicitar_servicio():
-    try:
-        cliente_id = session.get("cliente_id")
-        if not cliente_id:
-            return jsonify({'error': 'No se ha detectado el ID del cliente.'}), 400
+    cliente_id = session.get("cliente_id")
+    if not cliente_id:
+        return jsonify({'error': 'No se ha detectado el ID del cliente.'}), 400
 
-        print(f'🧩 Cliente solicitando servicio, ID: {cliente_id}')
+    print(f'🧩 Cliente solicitando servicio, ID: {cliente_id}')
 
-        cliente = Usuario.query.get(cliente_id)
-        if not cliente:
-            return jsonify({'error': 'Cliente no encontrado.'}), 404
+    cliente = Usuario.query.get(cliente_id)
+    if not cliente:
+        return jsonify({'error': 'Cliente no encontrado.'}), 404
 
-        if cliente.latitud is None or cliente.longitud is None:
-            print("❌ Cliente sin ubicación registrada.")
-            return jsonify({'error': 'Ubicación del cliente no disponible.'}), 400
+    # ⚠️ Verificar ubicación válida
+    if not cliente.latitud or not cliente.longitud:
+        print("❌ Cliente sin ubicación registrada.")
+        return jsonify({'error': 'Ubicación del cliente no disponible.'}), 400
 
-        print(f"🌍 Ubicación del cliente: {cliente.latitud}, {cliente.longitud}")
+    print(f"🌍 Ubicación del cliente: {cliente.latitud}, {cliente.longitud}")
 
-        nueva_solicitud = Solicitud(
-            cliente_id=cliente.id,
-            estado='pendiente',
-            latitud=cliente.latitud,
-            longitud=cliente.longitud
-        )
-        db.session.add(nueva_solicitud)
-        db.session.commit()
+    nueva_solicitud = Solicitud(
+        cliente_id=cliente.id,
+        estado='pendiente',
+        latitud=cliente.latitud,
+        longitud=cliente.longitud
+    )
+    db.session.add(nueva_solicitud)
+    # 🔧 INICIO PARCHE: commit→emit + fallback a todos los lavadores si no hay sesión
+    db.session.commit()  # primero confirmar en BD
 
-        payload = {
-            'solicitud_id': nueva_solicitud.id,
-            'cliente_id': cliente.id,
-            'nombre': cliente.nombre,
-            'apellido': cliente.apellido,
-            'telefono': cliente.telefono,
-            'latitud': cliente.latitud,
-            'longitud': cliente.longitud
-        }
+    lavador_id = session.get('lavador_id')
+    lavador = Usuario.query.get(lavador_id) if lavador_id else None
 
-        # ✅ UN SOLO EMIT a todos los lavadores conectados
-        print(f"🚀 Emitiendo solicitud {nueva_solicitud.id} a sala lavadores_activos")
-        socketio.emit('nueva_solicitud', payload, room="lavadores_activos")
+    payload = {
+        'solicitud_id': nueva_solicitud.id,
+        'cliente_id': cliente.id,
+        'lavador_id': lavador.id if lavador else None,
+        'nombre': cliente.nombre,
+        'apellido': cliente.apellido,
+        'telefono': cliente.telefono,
+        'latitud': getattr(cliente, 'latitud', None),
+        'longitud': getattr(cliente, 'longitud', None)
+    }
 
-        return jsonify({'success': 'Solicitud enviada correctamente.', 'solicitud_id': nueva_solicitud.id}), 200
+    if lavador:
+        print(f"🚀 Enviando solicitud {nueva_solicitud.id} a lavador_{lavador.id}")
+        socketio.emit('nueva_solicitud', payload, room=f"lavador_{lavador.id}")
+    else:
+        print("⚠️ No hay lavador en sesión; enviando a todos los lavadores.")
+        try:
+            lavadores = Usuario.query.filter_by(rol='lavador').all()
+        except Exception as e:
+            print("⚠️ No se pudo listar lavadores:", e)
+            lavadores = []
+        for lav in lavadores:
+            socketio.emit('nueva_solicitud', {**payload, 'lavador_id': lav.id}, room=f"lavador_{lav.id}")
+            print(f"📡 Replicada solicitud {nueva_solicitud.id} a lavador_{lav.id}")
 
-    except Exception as e:
-        print("🔥 ERROR en /solicitar_servicio:", str(e))
-        return jsonify({'error': 'Ocurrió un error inesperado.'}), 500
+    print(f'✅ Solicitud creada con ID {nueva_solicitud.id}')
+    return jsonify({'success': 'Solicitud enviada correctamente.', 'solicitud_id': nueva_solicitud.id})
+    # 🔧 FIN PARCHE
 
 @app.route('/solicitudes_activas')
 def solicitudes_activas():
@@ -463,23 +476,19 @@ def aceptar_solicitud():
     solicitud.lavador_id = lavador.id
     solicitud.estado = 'aceptado'
     db.session.commit()
-    # ✅ Avisar a TODOS los lavadores para que limpien la franja/botón si otro aceptó
-    lavadores = Usuario.query.filter_by(rol='lavador').all()
-    for lav in lavadores:
-        socketio.emit('nueva_solicitud_aceptada', {
-            'solicitud_id': solicitud.id,
-            'lavador_id': lavador.id,
-            'cliente_id': solicitud.cliente_id
-        }, room=f'lavador_{lav.id}')
+    
+    socketio.emit("nueva_solicitud_aceptada", {
+        'lavador_id': lavador.id,
+        'cliente_id': solicitud.cliente_id
+    })
 
     cliente = Usuario.query.get(solicitud.cliente_id)
     if cliente:
         socketio.emit('notificacion_cliente', {
             'cliente_id': cliente.id,
-            'lavador_id': lavador.id,
             'mensaje': f'El lavador ha aceptado tu solicitud y va en camino.'
-        })
-
+        })  
+        
     print(f"🧩 Solicitud {solicitud_id} aceptada por lavador {lavador.id}")
 
     return jsonify({'message': 'Solicitud aceptada correctamente.'})
@@ -648,33 +657,22 @@ def cancelar_solicitud():
         Solicitud.estado != 'finalizado'
     ).first()
 
-    if not solicitud:
+    if solicitud:
+        lavador = Usuario.query.get(solicitud.lavador_id)
+        cliente = Usuario.query.get(solicitud.cliente_id)
+
+        db.session.delete(solicitud)
+        db.session.commit()
+
+        if lavador:
+            socketio.emit('notificacion_lavador', {
+                'titulo': 'Solicitud cancelada',
+                'mensaje': f'El cliente {cliente.nombre} canceló la solicitud.'
+            })
+
+        return jsonify({'message': 'Solicitud cancelada correctamente.'})
+    else:
         return jsonify({'message': 'No se encontró una solicitud activa para cancelar.'}), 404
-
-    lavador_asignado_id = solicitud.lavador_id
-    cliente = Usuario.query.get(solicitud.cliente_id)
-
-    solicitud_id = solicitud.id
-    db.session.delete(solicitud)
-    db.session.commit()
-
-    # ✅ Avisar al lavador asignado (si existía)
-    if lavador_asignado_id:
-        socketio.emit('notificacion_lavador', {
-            'titulo': 'Solicitud cancelada',
-            'mensaje': f'El cliente {cliente.nombre} canceló la solicitud.'
-        }, room=f'lavador_{lavador_asignado_id}')
-
-    # ✅ Avisar a TODOS los lavadores para que limpien su UI (franja/botón)
-    lavadores = Usuario.query.filter_by(rol='lavador').all()
-    for lav in lavadores:
-        socketio.emit('solicitud_cancelada', {
-            'solicitud_id': solicitud_id,
-            'cliente_id': cliente_id,
-            'lavador_id': lavador_asignado_id
-        }, room=f'lavador_{lav.id}')
-
-    return jsonify({'message': 'Solicitud cancelada correctamente.'})
 
 @app.route('/terminos')
 def terminos():
@@ -712,61 +710,6 @@ def manejar_union_sala(data):
     print(f"🔒 Lavador {lavador_id} unido a sala privada")
     emit("union_confirmada", {"sala": room})
 # 🔧 FIN PARCHE UNION SALA (SERVIDOR)
-
-
-# ✅ INICIO FIX CHAT NOTIFICACION (evita NameError)
-# Esta funcion era llamada pero no existia; la dejamos segura y simple.
-# Emite un aviso al room del usuario si esta conectado (opcional) y NO rompe el chat.
-def emitir_mensaje_directo(destinatario_id, mensaje):
-    try:
-        socketio.emit(
-            "mensaje_nuevo",
-            {"destinatario_id": destinatario_id, "mensaje": mensaje},
-            room=str(destinatario_id)
-        )
-    except Exception as e:
-        print(f"⚠️ emitir_mensaje_directo fallo: {e}")
-
-@socketio.on("unirse_sala_lavadores")
-def unirse_sala_lavadores(data):
-    lavador_id = data.get("lavador_id")
-    if lavador_id:
-        join_room("lavadores_activos")
-        join_room(f"lavador_{lavador_id}")  # por si lo usas también
-        print(f"✅ Lavador {lavador_id} unido a lavadores_activos y lavador_{lavador_id}")
-
-@socketio.on("unirse_sala_mensajes")
-def manejar_union_sala_mensajes(data):
-    user_id = data.get("user_id")
-    if not user_id:
-        return
-    join_room(str(user_id))
-    # print(f"🔔 Usuario {user_id} unido a sala de mensajes")
-# ✅ FIN FIX CHAT NOTIFICACION
-
-@socketio.on("unirse_chat")
-def manejar_unirse_chat(data):
-    """Une al socket a la sala de chat estable chat_<min>_<max>."""
-    sala = None
-    if isinstance(data, dict):
-        sala = data.get("sala")
-        # Compatibilidad: si mandan ids en vez de sala
-        if not sala and data.get("cliente_id") and data.get("lavador_id"):
-            try:
-                c = int(data.get("cliente_id"))
-                l = int(data.get("lavador_id"))
-                sala = f"chat_{min(c,l)}_{max(c,l)}"
-            except Exception:
-                sala = None
-
-    if not sala:
-        emit("union_error", {"motivo": "sala de chat vacía"})
-        return
-
-    join_room(sala)
-    print(f"💬 Socket unido a sala de chat: {sala}")
-    emit("union_chat_confirmada", {"sala": sala})
-
 
 @socketio.on("enviar_mensaje_privado")
 def manejar_mensaje_privado(data):
