@@ -165,32 +165,20 @@ socket.on("nueva_solicitud", function(data) {
   console.log("📨 Solicitud recibida del cliente:", data);
   solicitudActualId = data && data.solicitud_id ? data.solicitud_id : null;
 
-  // ✅ Ya NO filtramos por data.lavador_id (porque ahora viene por broadcast)
-  console.log("✅ Mostrando solicitud a este lavador y uniéndome a mi sala privada");
-
   // 🔄 Actualizar clienteId dinámicamente al recibir solicitud
-  const clienteDataEl = document.getElementById("clienteData");
-  if (clienteDataEl) clienteDataEl.dataset.id = data.cliente_id;
-
+  document.getElementById("clienteData").dataset.id = data.cliente_id;
   clienteId = data.cliente_id;
-  try { localStorage.setItem('clienteId_actual', String(clienteId)); } catch(e) {}
+  localStorage.setItem('clienteId_actual', String(clienteId));
   console.log("🔄 clienteId actualizado dinámicamente:", clienteId);
 
-  // ✅ Unirse a la sala privada DEL LAVADOR (para chat/actualizaciones)
-  socket.emit("unirse_sala_privada", { lavador_id: lavadorId });
-
-  // UI: mostrar la solicitud
-  document.getElementById("solicitudes").innerHTML = ""; // Limpia solicitudes anteriores
+  document.getElementById("solicitudes").innerHTML = "";
   const div = document.createElement('div');
   div.innerHTML = `
-    <div>
-      <strong>${data.nombre} ${data.apellido}</strong><br>
-      Tel: ${data.telefono}<br>
-      <button id="botonAceptar_${data.solicitud_id}" class="aceptar" onclick="aceptar(${data.solicitud_id})">Aceptar</button>
-    </div>`;
+    <div><strong>${data.nombre} ${data.apellido}</strong><br>
+    Tel: ${data.telefono}<br>
+    <button id="botonAceptar_${data.solicitud_id}" class="aceptar" onclick="aceptar(${data.solicitud_id})">Aceptar</button></div>`;
   document.getElementById("solicitudes").appendChild(div);
 
-  // ✅ Franja amarilla: debe quedarse hasta aceptar/cancelar (no la ocultes aquí)
   const franja = document.getElementById("franjaSolicitud");
   if (franja) {
     franja.style.display = "block";
@@ -198,14 +186,9 @@ socket.on("nueva_solicitud", function(data) {
     franja.style.opacity = "1";
   }
 
-  // ✅ Solo inicia si no está ya corriendo
   if (!intervaloCliente) {
     intervaloCliente = setInterval(() => {
-      if (clienteId !== "none") {
-        obtenerUbicacionCliente();
-      } else {
-        console.warn("⚠️ clienteId inválido:", clienteId);
-      }
+      if (clienteId !== "none") obtenerUbicacionCliente();
     }, 5000);
   }
 });

@@ -375,49 +375,51 @@ def actualizar_ubicacion_cliente():
 
 @app.route('/solicitar_servicio', methods=['POST'])
 def solicitar_servicio():
-    cliente_id = session.get("cliente_id")
-    if not cliente_id:
-        return jsonify({'error': 'No se ha detectado el ID del cliente.'}), 400
+    try:
+        cliente_id = session.get("cliente_id")
+        if not cliente_id:
+            return jsonify({'error': 'No se ha detectado el ID del cliente.'}), 400
 
-    print(f'🧩 Cliente solicitando servicio, ID: {cliente_id}')
+        print(f'🧩 Cliente solicitando servicio, ID: {cliente_id}')
 
-    cliente = Usuario.query.get(cliente_id)
-    if not cliente:
-        return jsonify({'error': 'Cliente no encontrado.'}), 404
+        cliente = Usuario.query.get(cliente_id)
+        if not cliente:
+            return jsonify({'error': 'Cliente no encontrado.'}), 404
 
-    # ⚠️ Verificar ubicación válida
-    if not cliente.latitud or not cliente.longitud:
-        print("❌ Cliente sin ubicación registrada.")
-        return jsonify({'error': 'Ubicación del cliente no disponible.'}), 400
+        if cliente.latitud is None or cliente.longitud is None:
+            print("❌ Cliente sin ubicación registrada.")
+            return jsonify({'error': 'Ubicación del cliente no disponible.'}), 400
 
-    print(f"🌍 Ubicación del cliente: {cliente.latitud}, {cliente.longitud}")
+        print(f"🌍 Ubicación del cliente: {cliente.latitud}, {cliente.longitud}")
 
-    nueva_solicitud = Solicitud(
-        cliente_id=cliente.id,
-        estado='pendiente',
-        latitud=cliente.latitud,
-        longitud=cliente.longitud
-    )
-    db.session.add(nueva_solicitud)
-    db.session.commit()  # ✅ primero confirmar en BD
+        nueva_solicitud = Solicitud(
+            cliente_id=cliente.id,
+            estado='pendiente',
+            latitud=cliente.latitud,
+            longitud=cliente.longitud
+        )
+        db.session.add(nueva_solicitud)
+        db.session.commit()
 
-    # ✅ Payload mínimo para que TODOS los lavadores lo vean al instante
-    payload = {
-        'solicitud_id': nueva_solicitud.id,
-        'cliente_id': cliente.id,
-        'nombre': cliente.nombre,
-        'apellido': cliente.apellido,
-        'telefono': cliente.telefono,
-        'latitud': getattr(cliente, 'latitud', None),
-        'longitud': getattr(cliente, 'longitud', None)
-    }
+        payload = {
+            'solicitud_id': nueva_solicitud.id,
+            'cliente_id': cliente.id,
+            'nombre': cliente.nombre,
+            'apellido': cliente.apellido,
+            'telefono': cliente.telefono,
+            'latitud': cliente.latitud,
+            'longitud': cliente.longitud
+        }
 
-    # 🚀 Broadcast inmediato (NO rooms) -> evita delays por salas no unidas
-    print(f"🚀 Broadcast nueva_solicitud inmediata: {nueva_solicitud.id}")
-    socketio.emit('nueva_solicitud', payload, broadcast=True)
+        # ✅ UN SOLO EMIT a todos los lavadores conectados
+        print(f"🚀 Emitiendo solicitud {nueva_solicitud.id} a sala lavadores_activos")
+        socketio.emit('nueva_solicitud', payload, room="lavadores_activos")
 
-    print(f'✅ Solicitud creada con ID {nueva_solicitud.id}')
-    return jsonify({'success': 'Solicitud enviada correctamente.', 'solicitud_id': nueva_solicitud.id})
+        return jsonify({'success': 'Solicitud enviada correctamente.', 'solicitud_id': nueva_solicitud.id}), 200
+
+    except Exception as e:
+        print("🔥 ERROR en /solicitar_servicio:", str(e))
+        return jsonify({'error': 'Ocurrió un error inesperado.'}), 500
 
 @app.route('/solicitudes_activas')
 def solicitudes_activas():
@@ -724,6 +726,14 @@ def emitir_mensaje_directo(destinatario_id, mensaje):
         )
     except Exception as e:
         print(f"⚠️ emitir_mensaje_directo fallo: {e}")
+
+@socketio.on("unirse_sala_lavadores")
+def unirse_sala_lavadores(data):
+    lavador_id = data.get("lavador_id")
+    if lavador_id:
+        join_room("lavadores_activos")
+        join_room(f"lavador_{lavador_id}")  # por si lo usas también
+        print(f"✅ Lavador {lavador_id} unido a lavadores_activos y lavador_{lavador_id}")
 
 @socketio.on("unirse_sala_mensajes")
 def manejar_union_sala_mensajes(data):
