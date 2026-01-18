@@ -19,7 +19,7 @@
     .inactivo:hover { background-color: #a71d2a; }    
     .cerrar:hover { background-color: #1d2124; }
     .vercal:hover { background-color: #0056b3; }
-    #notificacion {
+    #franjaSolicitud {
       display: none;
       background-color: #ffc107;
       padding: 15px;
@@ -28,6 +28,7 @@
       margin-bottom: 10px;
       font-weight: bold;
     }
+
     #estado { margin-bottom: 10px; font-size: 15px; color: #ffffff; }
     .calificacion-box { background-color: #1e1e1e; border: 1px solid #555; margin: 20px auto; padding: 15px; border-radius: 12px; max-width: 360px; text-align: left; display: none; color: #ffffff; box-sizing: border-box; width: 85%; }
     .aceptar {
@@ -59,7 +60,7 @@
 <div id="estadoSolicitud" data-aceptada="{{ 'true' if solicitud_activa and solicitud_activa.estado == 'aceptado' else 'false' }}"></div>
 
 
-<div id="notificacion">¡Nueva solicitud recibida!</div>
+<div id="franjaSolicitud">🟡 Nueva solicitud recibida</div>
 <div id="map"></div>
 
 <button class="activo" onclick="cambiarEstado('activo')">🔔 Activar</button>
@@ -112,18 +113,10 @@ function abrirChat() {
   });
 
   socket.on("union_confirmada", (d) => {
-    const n = document.getElementById("notificacion");
-    if (n) {
-      n.style.display = "block";
-      n.innerText = "Conectado a " + d.sala;  // <- clave correcta
-      setTimeout(() => {
-        n.style.display = "none";
-        n.innerText = "¡Nueva solicitud recibida!";
-      }, 2000);
-    }
+    console.log("✅ Unido a sala:", d && d.sala ? d.sala : d);
+   // No mostrar franja aquí. La franja amarilla es SOLO para nueva_solicitud. 
   });
-
-
+    
   // 🔧 INICIO CAMBIO: limpieza inmediata en otros lavadores
   socket.on('nueva_solicitud_aceptada', (data) => {
     try {
@@ -168,46 +161,54 @@ function abrirChat() {
   });
   // 🔧 FIN CAMBIO
 
-
 socket.on("nueva_solicitud", function(data) {
   console.log("📨 Solicitud recibida del cliente:", data);
   solicitudActualId = data && data.solicitud_id ? data.solicitud_id : null;
 
+  // ✅ Ya NO filtramos por data.lavador_id (porque ahora viene por broadcast)
+  console.log("✅ Mostrando solicitud a este lavador y uniéndome a mi sala privada");
 
-  if (data.lavador_id == lavadorId) {
-    console.log("✅ Esta solicitud es para mí, me uno a mi sala privada");
-    // 🔄 Actualizar clienteId dinámicamente al recibir solicitud
-    document.getElementById("clienteData").dataset.id = data.cliente_id;
-    clienteId = data.cliente_id;
-    localStorage.setItem('clienteId_actual', String(clienteId));
-    console.log("🔄 clienteId actualizado dinámicamente:", clienteId);
+  // 🔄 Actualizar clienteId dinámicamente al recibir solicitud
+  const clienteDataEl = document.getElementById("clienteData");
+  if (clienteDataEl) clienteDataEl.dataset.id = data.cliente_id;
 
-    socket.emit("unirse_sala_privada", {
-      lavador_id: lavadorId
-    });
+  clienteId = data.cliente_id;
+  try { localStorage.setItem('clienteId_actual', String(clienteId)); } catch(e) {}
+  console.log("🔄 clienteId actualizado dinámicamente:", clienteId);
 
-    document.getElementById("solicitudes").innerHTML = ""; // Limpia solicitudes anteriores
-    const div = document.createElement('div');
-    div.innerHTML = `
-      <div><strong>${data.nombre} ${data.apellido}</strong><br>
+  // ✅ Unirse a la sala privada DEL LAVADOR (para chat/actualizaciones)
+  socket.emit("unirse_sala_privada", { lavador_id: lavadorId });
+
+  // UI: mostrar la solicitud
+  document.getElementById("solicitudes").innerHTML = ""; // Limpia solicitudes anteriores
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div>
+      <strong>${data.nombre} ${data.apellido}</strong><br>
       Tel: ${data.telefono}<br>
-      <button id="botonAceptar_${data.solicitud_id}" class="aceptar" onclick="aceptar(${data.solicitud_id})">Aceptar</button></div>`;
-    document.getElementById("solicitudes").appendChild(div);
-    document.getElementById("notificacion").style.display = "block";
+      <button id="botonAceptar_${data.solicitud_id}" class="aceptar" onclick="aceptar(${data.solicitud_id})">Aceptar</button>
+    </div>`;
+  document.getElementById("solicitudes").appendChild(div);
 
-    // ✅ Solo inicia si no está ya corriendo
-    if (!intervaloCliente) {
-      intervaloCliente = setInterval(() => {
-        if (clienteId !== "none") {
-          obtenerUbicacionCliente();
-        } else {
-          console.warn("⚠️ clienteId inválido:", clienteId);
-        }
-      }, 5000);
-    }
+  // ✅ Franja amarilla: debe quedarse hasta aceptar/cancelar (no la ocultes aquí)
+  const franja = document.getElementById("franjaSolicitud");
+  if (franja) {
+    franja.style.display = "block";
+    franja.innerText = "🟡 Nueva solicitud recibida";
+    franja.style.opacity = "1";
+  }
+
+  // ✅ Solo inicia si no está ya corriendo
+  if (!intervaloCliente) {
+    intervaloCliente = setInterval(() => {
+      if (clienteId !== "none") {
+        obtenerUbicacionCliente();
+      } else {
+        console.warn("⚠️ clienteId inválido:", clienteId);
+      }
+    }, 5000);
   }
 });
-
 
 </script>
 
@@ -348,6 +349,13 @@ function aceptar(id) {
       if (botonAceptar) {
         botonAceptar.style.display = "none";
       }
+
+      // 🔧 INICIO PARCHE: ocultar franja de nueva solicitud
+      const franja = document.getElementById("franjaSolicitud");
+      if (franja) {
+        franja.style.display = "none";
+      }
+      // 🔧 FIN PARCHE
 
       iniciarMovimientoManual(id);  // Sigue normal
 

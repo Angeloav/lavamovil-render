@@ -399,16 +399,12 @@ def solicitar_servicio():
         longitud=cliente.longitud
     )
     db.session.add(nueva_solicitud)
-    # 🔧 INICIO PARCHE: commit→emit + fallback a todos los lavadores si no hay sesión
-    db.session.commit()  # primero confirmar en BD
+    db.session.commit()  # ✅ primero confirmar en BD
 
-    lavador_id = session.get('lavador_id')
-    lavador = Usuario.query.get(lavador_id) if lavador_id else None
-
+    # ✅ Payload mínimo para que TODOS los lavadores lo vean al instante
     payload = {
         'solicitud_id': nueva_solicitud.id,
         'cliente_id': cliente.id,
-        'lavador_id': lavador.id if lavador else None,
         'nombre': cliente.nombre,
         'apellido': cliente.apellido,
         'telefono': cliente.telefono,
@@ -416,23 +412,12 @@ def solicitar_servicio():
         'longitud': getattr(cliente, 'longitud', None)
     }
 
-    if lavador:
-        print(f"🚀 Enviando solicitud {nueva_solicitud.id} a lavador_{lavador.id}")
-        socketio.emit('nueva_solicitud', payload, room=f"lavador_{lavador.id}")
-    else:
-        print("⚠️ No hay lavador en sesión; enviando a todos los lavadores.")
-        try:
-            lavadores = Usuario.query.filter_by(rol='lavador').all()
-        except Exception as e:
-            print("⚠️ No se pudo listar lavadores:", e)
-            lavadores = []
-        for lav in lavadores:
-            socketio.emit('nueva_solicitud', {**payload, 'lavador_id': lav.id}, room=f"lavador_{lav.id}")
-            print(f"📡 Replicada solicitud {nueva_solicitud.id} a lavador_{lav.id}")
+    # 🚀 Broadcast inmediato (NO rooms) -> evita delays por salas no unidas
+    print(f"🚀 Broadcast nueva_solicitud inmediata: {nueva_solicitud.id}")
+    socketio.emit('nueva_solicitud', payload, broadcast=True)
 
     print(f'✅ Solicitud creada con ID {nueva_solicitud.id}')
     return jsonify({'success': 'Solicitud enviada correctamente.', 'solicitud_id': nueva_solicitud.id})
-    # 🔧 FIN PARCHE
 
 @app.route('/solicitudes_activas')
 def solicitudes_activas():
