@@ -76,7 +76,6 @@
 
 <form action="/chat" method="get">
   <input type="hidden" name="rol" value="lavador">
-  <input type="hidden" name="cliente_id" id="clienteIdHidden" value="">
   <button id="botonChat" type="submit" style="background-color: #6c63ff; color: white; padding: 10px; border-radius: 10px;">
     💬 Chat con Cliente
   </button>
@@ -84,9 +83,12 @@
 
 <script>
 function abrirChat() {
-  // tu lógica actual para abrir modal/chat…
-  const b = document.getElementById("burbujaChat");
-  if (b) b.remove();
+  const lavadorId = {{ lavador.id }};
+  if (clienteId !== "none" ) {
+    window.location.href = `/chat_privado/${clienteId}/${lavadorId}`;
+  } else {
+    alert("❌ No hay una solicitud activa.");
+  }
 }
 </script>
 
@@ -96,101 +98,49 @@ function abrirChat() {
 
 <!-- 🔧 INICIO PARCHE FRONT -->
 <script>
-  // socket global
-  window.socket = io(window.location.origin, {
+  const socket = io(window.location.origin, {
     transports: ["websocket","polling"],
     reconnection: true,
     reconnectionAttempts: 10
   });
 
-  // IDs
-  const lavadorId  = {{ lavador.id|tojson }};
-  const LAVADOR_ID = Number({{ lavador.id|tojson }});
+  const lavadorId = {{ lavador.id|tojson }};
 
-  // estado de unión al chat
-  let yaUnidoChat = false;
-
-  // ======== unión robusta a sala chat_<menor>_<mayor>
-  function joinSalaChatSiListo() {
-    // clienteId debe existir en el dashboard (lo seteas cuando llega la solicitud/aceptación)
-    if (typeof clienteId === "undefined" || clienteId === null || clienteId === "none") return;
-
-    const C = Number(clienteId);
-    const L = Number(LAVADOR_ID);
-    if (!Number.isFinite(C) || !Number.isFinite(L)) return;
-
-    const sala = `chat_${Math.min(C, L)}_${Math.max(C, L)}`;
-    if (!yaUnidoChat) {
-      window.socket.emit("unirse_chat", { sala });
-      yaUnidoChat = true;
-      console.log("✅ Lavador unido a", sala);
-    }
-  }
-
-  // al conectar: sala privada + rejoin chat
-  window.socket.on("connect", () => {
-    console.log("🟢 Socket conectado:", window.socket.id);
-
-    // sala privada del lavador
-    window.socket.emit("unirse_sala_privada", { lavador_id: lavadorId });
-
-    // rejoin al chat
-    yaUnidoChat = false;
-    joinSalaChatSiListo();
-
-    const timer = setInterval(() => {
-      if (yaUnidoChat) return clearInterval(timer);
-      joinSalaChatSiListo();
-    }, 1000);
+  socket.on("connect", () => {
+    console.log("🟢 Socket conectado:", socket.id);
+    socket.emit("unirse_sala_privada", { lavador_id: lavadorId });
   });
 
-  // reconexiones: permitir rejoin siempre
-  window.socket.on("disconnect",        () => { yaUnidoChat = false; });
-  window.socket.on("reconnect",         () => { yaUnidoChat = false; joinSalaChatSiListo(); });
-  window.socket.on("reconnect_attempt", () => { yaUnidoChat = false; });
+  socket.on("union_confirmada", (d) => {
+    const n = document.getElementById("notificacion");
+    if (n) {
+      n.style.display = "block";
+      n.innerText = "Conectado a " + d.sala;  // <- clave correcta
+      setTimeout(() => {
+        n.style.display = "none";
+        n.innerText = "¡Nueva solicitud recibida!";
+      }, 2000);
+    }
+  });
 
-  // rejoin defensivo cada 15s (por si algo se desincroniza)
-  setInterval(() => {
-    if (!yaUnidoChat) joinSalaChatSiListo();
-  }, 15000);
-
-  // recibir solicitud en vivo (actualiza clienteId y únete al chat)
-  window.socket.on("nueva_solicitud", (data) => {
+  socket.on("nueva_solicitud", (data) => {
     console.log("📨 Solicitud recibida en lavador:", data);
-    if (data && data.cliente_id) {
-      // si tu UI ya lo setea en otro lado, no pasa nada por re-asignar
-      clienteId = data.cliente_id;
-      joinSalaChatSiListo();
-    }
-  });
-
-  // escuchar mensajes del chat
-  window.socket.on("recibir_mensaje_privado", (data) => {
-    console.log("📥 Mensaje recibido:", data);
-    const box = document.getElementById("mensajes") || document.body;
-    const p = document.createElement("p");
-    p.textContent = data.mensaje;
-    box.appendChild(p);
-    box.scrollTop = box.scrollHeight;
+    // aquí tu UI/sonido existente
   });
 </script>
 <!-- 🔧 FIN PARCHE FRONT -->
 
 <script>
-const socket = window.socket;
-
 let map, lavadorMarker, clienteMarker, rutaPolyline;
 
 function actualizarUbicacion(lat, lng) {
   console.log("📡 Ubicación del lavador lista:", lat, lng);
 
-  if (window.socket && typeof window.socket.emit === "function") {
-    window.socket.emit("ubicacion_lavador", {
-      lavador_id: lavadorId,
-      latitud: lat,
-      longitud: lng
-    });
-  }
+  socket.emit("ubicacion_lavador", {
+    lavador_id: lavadorId,
+    latitud: lat,
+    longitud: lng
+  });
 
   // ✅ GUARDAR EN EL BACKEND AHORA MISMO
   fetch(`/actualizar_ubicacion_lavador?lat=${lat}&lng=${lng}`, {
@@ -392,7 +342,7 @@ function obtenerUbicacionLavador() {
 
 let intervaloCliente = null;
 
-window.socket.on("nueva_solicitud", function(data) {
+socket.on("nueva_solicitud", function(data) {
   console.log("📨 Solicitud recibida del cliente:", data);
 
   if (data.lavador_id == lavadorId) {
@@ -401,36 +351,19 @@ window.socket.on("nueva_solicitud", function(data) {
     document.getElementById("clienteData").dataset.id = data.cliente_id;
     clienteId = data.cliente_id;
     console.log("🔄 clienteId actualizado dinámicamente:", clienteId);
-        
-    joinSalaChatSiListo();
-    
-    window.socket.emit("unirse_sala_privada", {
+
+    socket.emit("unirse_sala_privada", {
       lavador_id: lavadorId
     });
 
-    const wrap = document.createElement('div');
-
-    const strong = document.createElement('strong');
-    strong.textContent = `${data.nombre} ${data.apellido}`;
-    wrap.appendChild(strong);
-    wrap.appendChild(document.createElement('br'));
-
-    wrap.appendChild(document.createTextNode(`Tel: ${data.telefono}`));
-    wrap.appendChild(document.createElement('br'));
-
-    const btn = document.createElement('button');
-    btn.id = `botonAceptar_${data.solicitud_id}`;
-    btn.className = 'aceptar';
-    btn.type = 'button';
-    btn.textContent = 'Aceptar';
-    btn.addEventListener('click', () => aceptar(data.solicitud_id));
-    wrap.appendChild(btn);
-
-    const cont = document.getElementById('solicitudes');
-    cont.innerHTML = '';
-    cont.appendChild(wrap);
-    document.getElementById('notificacion').style.display = 'block';
-    window.aceptar = aceptar; // para que onclick / listener encuentre la función
+    document.getElementById("solicitudes").innerHTML = ""; // Limpia solicitudes anteriores
+    const div = document.createElement('div');
+    div.innerHTML = `
+      <div><strong>${data.nombre} ${data.apellido}</strong><br>
+      Tel: ${data.telefono}<br>
+      <button id="botonAceptar_${data.solicitud_id}" class="aceptar" onclick="aceptar(${data.solicitud_id})">Aceptar</button></div>`;
+    document.getElementById("solicitudes").appendChild(div);
+    document.getElementById("notificacion").style.display = "block";
 
     // ✅ Solo inicia si no está ya corriendo
     if (!intervaloCliente) {
@@ -449,59 +382,20 @@ window.socket.on("nueva_solicitud", function(data) {
 
 <script>
 function aceptar(id) { 
-  console.log("✅ click aceptar", id);
+  fetch(`/aceptar_solicitud?solicitud_id=${id}`)
+    .then(res => res.json())
+    .then(res => {
+      alert(res.message || res.error);
 
-  fetch(`/aceptar_solicitud?solicitud_id=${id}`, {
-    method: "GET",
-    credentials: "include",   // 🔑 mantiene la sesión
-    cache: "no-store"
-  })
-  .then(res => res.ok ? res.json() : Promise.reject(res))
-  .then(res => {
-    alert(res.message || res.error);
-
-    // Oculta el botón de aceptar de esa tarjeta
-    const botonAceptar = document.getElementById(`botonAceptar_${id}`);
-    if (botonAceptar) botonAceptar.style.display = "none";
-
-    if (res.cliente_id) {
-      const hidden = document.getElementById("clienteIdHidden");
-      if (hidden) hidden.value = res.cliente_id;
-    }
-
-    clienteId = res.cliente_id;
-      joinSalaChatSiListo();
-
-    // Asegura unión a la sala privada tras aceptar
-    try {
-      if (window.socket && typeof window.socket.emit === "function") {
-        socket.emit("unirse_sala_privada", { lavador_id: LAVADOR_ID });
+      const botonAceptar = document.getElementById(`botonAceptar_${id}`);
+      if (botonAceptar) {
+        botonAceptar.style.display = "none";
       }
-    } catch (e) { 
-      console.warn("⚠️ unión sala falló:", e); 
-    }
 
-    // Refresca burbuja chat
-    const boton = document.getElementById("botonChat");
-    if (boton) {
-      let b = document.getElementById("burbujaChat");
-      if (!b) {
-        b = document.createElement("span");
-        b.id = "burbujaChat";
-        b.textContent = "🔴";
-        b.style.marginLeft = "5px";
-        boton.appendChild(b);
-      }
-    }
-
-    // 🚀 flujo normal
-    iniciarMovimientoManual(id);
-  })
-  .catch(err => console.error("✘ aceptar_solicitud:", err.status || err, err.statusText || ""));
+      iniciarMovimientoManual(id);  // Sigue normal
+      // ❌ location.reload(); → ELIMINADO
+    });
 }
-
-// 👈 garantiza que onclick la encuentre
-window.aceptar = aceptar;
 
 function iniciarMovimientoManual(solicitudId) {
   fetch(`/obtener_ids_por_solicitud?solicitud_id=${solicitudId}`)
@@ -588,25 +482,20 @@ document.addEventListener('click', () => {
 }, { once: true });
 
 setInterval(() => {
-  fetch("/verificar_mensajes_nuevos", {
-    method: "GET",
-    credentials: "include",   // 🔑 manda la cookie de sesión
-    cache: "no-store"         // evita respuestas cacheadas
-  })
-  .then(res => res.ok ? res.json() : Promise.reject(res))
-  .then(data => {
-    if (data.mensajes_nuevos && !document.getElementById("burbujaChat")) {
-      const burbuja = document.createElement("span");
-      burbuja.textContent = "🔴";
-      burbuja.id = "burbujaChat";
-      burbuja.style.marginLeft = "5px";
-      const boton = document.getElementById("botonChat");
-      if (boton) boton.appendChild(burbuja);
-    }
-  })
-  .catch(err => console.error("✘ verificar_mensajes_nuevos (lavador):", err.status || err, err.statusText || ""));
+  fetch("/verificar_mensajes_nuevos")
+    .then(res => res.json())
+    .then(data => {
+      if (data.mensajes_nuevos && !document.getElementById("burbujaChat")) {
+        const burbuja = document.createElement("span");
+        burbuja.textContent = "🔴";
+        burbuja.id = "burbujaChat";
+        burbuja.style.marginLeft = "5px";
+        const boton = document.getElementById("botonChat");
+        if (boton) boton.appendChild(burbuja);
+      }
+    });
 }, 5000);
-   
+    
 socket.on("actualizar_ubicacion_cliente", (data) => {
   const posicionCliente = { lat: data.latitud, lng: data.longitud };
 
