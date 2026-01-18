@@ -749,6 +749,30 @@ def manejar_union_sala_mensajes(data):
     # print(f"🔔 Usuario {user_id} unido a sala de mensajes")
 # ✅ FIN FIX CHAT NOTIFICACION
 
+@socketio.on("unirse_chat")
+def manejar_unirse_chat(data):
+    """Une al socket a la sala de chat estable chat_<min>_<max>."""
+    sala = None
+    if isinstance(data, dict):
+        sala = data.get("sala")
+        # Compatibilidad: si mandan ids en vez de sala
+        if not sala and data.get("cliente_id") and data.get("lavador_id"):
+            try:
+                c = int(data.get("cliente_id"))
+                l = int(data.get("lavador_id"))
+                sala = f"chat_{min(c,l)}_{max(c,l)}"
+            except Exception:
+                sala = None
+
+    if not sala:
+        emit("union_error", {"motivo": "sala de chat vacía"})
+        return
+
+    join_room(sala)
+    print(f"💬 Socket unido a sala de chat: {sala}")
+    emit("union_chat_confirmada", {"sala": sala})
+
+
 @socketio.on("enviar_mensaje_privado")
 def manejar_mensaje_privado(data):
     if not all(k in data for k in ("cliente_id", "lavador_id", "autor_id", "mensaje")):
