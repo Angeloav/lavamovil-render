@@ -726,6 +726,29 @@ def manejar_union_sala(data):
     emit("union_confirmada", {"sala": room})
 # 🔧 FIN PARCHE UNION SALA (SERVIDOR)
 
+
+# ✅ INICIO FIX CHAT NOTIFICACION (evita NameError)
+# Esta funcion era llamada pero no existia; la dejamos segura y simple.
+# Emite un aviso al room del usuario si esta conectado (opcional) y NO rompe el chat.
+def emitir_mensaje_directo(destinatario_id, mensaje):
+    try:
+        socketio.emit(
+            "mensaje_nuevo",
+            {"destinatario_id": destinatario_id, "mensaje": mensaje},
+            room=str(destinatario_id)
+        )
+    except Exception as e:
+        print(f"⚠️ emitir_mensaje_directo fallo: {e}")
+
+@socketio.on("unirse_sala_mensajes")
+def manejar_union_sala_mensajes(data):
+    user_id = data.get("user_id")
+    if not user_id:
+        return
+    join_room(str(user_id))
+    # print(f"🔔 Usuario {user_id} unido a sala de mensajes")
+# ✅ FIN FIX CHAT NOTIFICACION
+
 @socketio.on("enviar_mensaje_privado")
 def manejar_mensaje_privado(data):
     if not all(k in data for k in ("cliente_id", "lavador_id", "autor_id", "mensaje")):
