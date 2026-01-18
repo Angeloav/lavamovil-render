@@ -5,85 +5,28 @@ from flask_session import Session
 from flask_login import LoginManager, UserMixin, login_user, logout_user, current_user, login_required
 from werkzeug.utils import secure_filename
 from datetime import datetime, timedelta
-from werkzeug.middleware.proxy_fix import ProxyFix
 import os
 
-# =========================
 # Configuración inicial de la app
-# =========================
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'secret!'
 
-# ===== INICIO PARCHE HTTPS REAL EN RENDER =====
-# Asegura que Flask reconozca HTTPS detrás del proxy (Render)
-app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
-# ===== FIN PARCHE HTTPS REAL EN RENDER =====
-
-# Clave secreta
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
-
-# ✅ Base dir estable (no instance/, no cwd cambiante)
+# ✅ Corrección importante para que la base de datos NO se cree dentro de instance/
 basedir = os.path.abspath(os.path.dirname(__file__))
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(basedir, "lavamovil.db")}'
 
-# =========================
-# Sesión persistente
-# =========================
-# ===== INICIO PARCHE SESION PERSISTENTE =====
-app.config["SESSION_PERMANENT"] = True
-app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)  # ajusta si quieres
-# ===== FIN PARCHE SESION PERSISTENTE =====
+# Rutas para cargar archivos
+app.config['UPLOAD_FOLDER'] = 'static/bauches'
 
-# ===== INICIO PARCHE COOKIE PERSISTENTE (ANDROID/WEBVIEW) =====
-app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "None"      # clave para WebView/redirects
-app.config["SESSION_REFRESH_EACH_REQUEST"] = False  # evita re-escrituras raras
+# Configuración de la sesión
+app.config['SESSION_TYPE'] = 'filesystem'
+app.config['SESSION_FILE_DIR'] = os.path.join(os.getcwd(), 'flask_session')
 
-# SECURE por ambiente:
-# - En Render debe ser True (https)
-# - En local suele romper si no estas en https
-is_render = os.environ.get("RENDER", "").lower() == "true"
-is_production = os.environ.get("FLASK_ENV", "").lower() == "production"
-app.config["SESSION_COOKIE_SECURE"] = (is_render or is_production)
-# ===== FIN PARCHE COOKIE PERSISTENTE =====
-
-# =========================
-# Base de datos (SQLite)
-# =========================
-# ✅ Para que la BD NO se cree dentro de instance/
-app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{os.path.join(basedir, 'lavamovil.db')}"
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-
-# =========================
-# Rutas para subir archivos
-# =========================
-app.config["UPLOAD_FOLDER"] = "static/bauches"
-
-# =========================
-# Configuración Flask-Session (filesystem)
-# =========================
-app.config["SESSION_TYPE"] = "filesystem"
-app.config["SESSION_USE_SIGNER"] = False
-app.config["SESSION_COOKIE_NAME"] = "lavamovil_session"
-app.config["SESSION_FILE_THRESHOLD"] = 5000
-
-# ===== INICIO PARCHE PATH SESSION DIR ESTABLE =====
-# NO uses os.getcwd() en Render porque puede variar por worker
-app.config["SESSION_FILE_DIR"] = os.path.join(basedir, "flask_session")
-os.makedirs(app.config["SESSION_FILE_DIR"], exist_ok=True)
-# ===== FIN PARCHE =====
-
-# =========================
-# Inicializaciones (orden correcto)
-# =========================
+# 🔧 INICIO PARCHE — ORDEN CORRECTO
 db = SQLAlchemy(app)
 Session(app)
-
-socketio = SocketIO(
-    app,
-    async_mode="eventlet",
-    cors_allowed_origins="*",
-    logger=True,
-    engineio_logger=True
-)
+socketio = SocketIO(app, async_mode="eventlet", cors_allowed_origins="*", logger=True, engineio_logger=True)
+# 🔧 FIN PARCHE
 
 # Modelos
 class Usuario(db.Model):
@@ -183,80 +126,19 @@ def cliente_dashboard():
 @app.route('/registro_lavador', methods=['GET', 'POST'])
 def registro_lavador():
     if request.method == 'POST':
-        nombre = (request.form.get('nombre') or '').strip()
-        apellido = (request.form.get('apellido') or '').strip()
-        telefono = (request.form.get('telefono') or '').strip()
+        nombre = request.form['nombre']
+        apellido = request.form['apellido']
+        telefono = request.form['telefono']
 
-        # Normalizar teléfono: solo dígitos
-        telefono_norm = ''.join(ch for ch in telefono if ch.isdigit())
-
-        # Buscar lavador existente por teléfono (normalizado o crudo)
-        lavador_existente = None
-        if telefono_norm:
-            lavador_existente = Usuario.query.filter(
-                Usuario.rol == 'lavador',
-                (Usuario.telefono == telefono_norm) | (Usuario.telefono == telefono)
-            ).order_by(Usuario.id.desc()).first()
-        else:
-            lavador_existente = Usuario.query.filter_by(
-                rol='lavador',
-                telefono=telefono
-            ).order_by(Usuario.id.desc()).first()
-
-        if lavador_existente:
-            # Actualiza datos básicos si vienen
-            if nombre:
-                lavador_existente.nombre = nombre
-            if apellido:
-                lavador_existente.apellido = apellido
-
-            # Normaliza teléfono si aplica
-            if telefono_norm:
-                lavador_existente.telefono = telefono_norm
-            elif telefono:
-                lavador_existente.telefono = telefono
-
-            db.session.commit()
-
-            # Guardar sesión SIEMPRE igual
-            session['lavador_id'] = lavador_existente.id
-            session['lavador_nombre'] = lavador_existente.nombre or nombre
-            session['lavador_apellido'] = lavador_existente.apellido or apellido
-            session['lavador_telefono'] = lavador_existente.telefono or (telefono_norm if telefono_norm else telefono)
-            session.permanent = True
-
-            # ✅ SI está vigente -> DIRECTO al dashboard (solo llenó formulario 1)
-            if lavador_existente.fecha_expiracion and lavador_existente.fecha_expiracion > datetime.utcnow():
-                return redirect(url_for('lavador_dashboard'))
-
-            # ✅ NO vigente -> entra al flujo de completar perfil/pago
-            # Forzamos mostrar el formulario 2 al menos una vez cuando viene desde registro
-            session["forzar_formulario_lavador"] = True
-            return redirect(url_for('lavador_formulario'))
-
-        # Si no existe, crear nuevo (lavador nuevo)
-        lavador = Usuario(
-            rol='lavador',
-            nombre=nombre,
-            apellido=apellido,
-            telefono=telefono_norm if telefono_norm else telefono
-        )
+        lavador = Usuario(rol='lavador', nombre=nombre, apellido=apellido, telefono=telefono)
         db.session.add(lavador)
         db.session.commit()
 
-        # Guardar sesión igual que arriba
-        session['lavador_id'] = lavador.id
-        session['lavador_nombre'] = lavador.nombre
-        session['lavador_apellido'] = lavador.apellido
-        session['lavador_telefono'] = lavador.telefono
-        session.permanent = True
+        session['lavador_id'] = lavador.id  # Guarda lo correcto
 
-        # ✅ Nuevo -> debe ver formulario 2 sí o sí y luego pagar
-        session["forzar_formulario_lavador"] = True
         return redirect(url_for('lavador_formulario'))
 
     return render_template('registro_lavador.html')
-
 
 @app.route('/lavador_formulario', methods=['GET', 'POST'])
 def lavador_formulario():
@@ -267,26 +149,20 @@ def lavador_formulario():
     if not lavador:
         return 'Lavador no encontrado. Por favor regístrate de nuevo.'
 
-    # ===== INICIO PARCHE: control del paso 2 =====
-    # Si venimos desde /registro_lavador, mostramos este paso sí o sí UNA vez.
-    forzar = session.pop("forzar_formulario_lavador", False)
-
-    # Si NO estamos forzando, y ya tiene el perfil completo, no mostramos el paso 2 (va a pago)
-    if (not forzar) and lavador.nombre and lavador.apellido and lavador.id_personal:
+    if lavador.nombre and lavador.apellido and lavador.id_personal:
         return redirect(url_for('lavador_pago'))
-    # ===== FIN PARCHE =====
 
     if request.method == 'POST':
-        lavador.nombre = (request.form.get('nombre') or '').strip()
-        lavador.apellido = (request.form.get('apellido') or '').strip()
-        lavador.id_personal = (request.form.get('id_personal') or '').strip()
-        lavador.telefono = (request.form.get('telefono') or '').strip()
-        lavador.descripcion = (request.form.get('descripcion') or '').strip()
+        lavador.nombre = request.form['nombre']
+        lavador.apellido = request.form['apellido']
+        lavador.id_personal = request.form['id_personal']
+        lavador.telefono = request.form['telefono']
+        lavador.descripcion = request.form['descripcion']
         lavador.estado = 'inactivo'
         db.session.commit()
         return redirect(url_for('lavador_pago'))
 
-    return render_template('lavador_formulario.html', lavador=lavador)
+    return render_template('lavador_formulario.html', lavador=lavador)  # 👈 ESTA LÍNEA ES CLAVE
 
 @app.route('/lavador_pago')
 def lavador_pago():
@@ -575,14 +451,6 @@ def solicitudes_activas():
 
 @app.route('/aceptar_solicitud')
 def aceptar_solicitud():
-    # 🔥 MARCA DE ENTRADA (DEBUG)
-    print(
-        "🔥 ENTRO A /aceptar_solicitud",
-        request.args,
-        "session.lavador_id=",
-        session.get("lavador_id")
-    )
-
     if 'lavador_id' not in session:
         return jsonify({'error': 'No autorizado'}), 401
 
@@ -597,61 +465,37 @@ def aceptar_solicitud():
     if solicitud.estado != 'pendiente':
         return jsonify({'error': 'La solicitud ya fue gestionada'}), 400
 
-    lavador = Usuario.query.get(session['lavador_id'])
+    lavador = Usuario.query.get(session['lavador_id'])  # ✅ cambio aquí
     if not lavador:
         return jsonify({'error': 'Lavador no encontrado'}), 404
 
-    # ✅ ASIGNAR SOLICITUD AL LAVADOR
+    # Ya no necesitas volver a poner esto:
+    # session['lavador_id'] = lavador.id
+
+    # ✅ Asignar el lavador a la solicitud
     solicitud.lavador_id = lavador.id
     solicitud.estado = 'aceptado'
-
-    # 🔴 Mantener tu lógica de burbuja de mensajes
-    solicitud.tiene_mensajes_nuevos = True
-
     db.session.commit()
+    # ✅ Avisar a TODOS los lavadores para que limpien la franja/botón si otro aceptó
+    lavadores = Usuario.query.filter_by(rol='lavador').all()
+    for lav in lavadores:
+        socketio.emit('nueva_solicitud_aceptada', {
+            'solicitud_id': solicitud.id,
+            'lavador_id': lavador.id,
+            'cliente_id': solicitud.cliente_id
+        }, room=f'lavador_{lav.id}')
 
-    print(
-        "🔥 COMMIT OK",
-        "solicitud_id=", solicitud.id,
-        "cliente_id=", solicitud.cliente_id,
-        "lavador_id=", lavador.id
-    )
-
-    # ✅ EMIT GLOBAL → TODOS LOS LAVADORES DEBEN LIMPIAR
-    payload = {
-        'solicitud_id': solicitud.id,
-        'cliente_id': solicitud.cliente_id,
-        'lavador_id': lavador.id
-    }
-
-    try:
-        socketio.emit("nueva_solicitud_aceptada", payload)
-        print("🔥 EMIT nueva_solicitud_aceptada:", payload)
-    except Exception as e:
-        print("❌ ERROR emit nueva_solicitud_aceptada:", e)
-
-    # ✅ NOTIFICACIÓN AL CLIENTE
     cliente = Usuario.query.get(solicitud.cliente_id)
     if cliente:
-        try:
-            socketio.emit(
-                'notificacion_cliente',
-                {
-                    'cliente_id': cliente.id,
-                    'mensaje': 'El lavador ha aceptado tu solicitud y va en camino.'
-                }
-            )
-        except Exception as e:
-            print("❌ ERROR emit notificacion_cliente:", e)
+        socketio.emit('notificacion_cliente', {
+            'cliente_id': cliente.id,
+            'lavador_id': lavador.id,
+            'mensaje': f'El lavador ha aceptado tu solicitud y va en camino.'
+        })
 
-    print(f"🧩 Solicitud {solicitud.id} aceptada por lavador {lavador.id}")
+    print(f"🧩 Solicitud {solicitud_id} aceptada por lavador {lavador.id}")
 
-    return jsonify({
-        'message': 'Solicitud aceptada correctamente.',
-        'solicitud_id': solicitud.id,
-        'cliente_id': solicitud.cliente_id,
-        'lavador_id': lavador.id
-    })
+    return jsonify({'message': 'Solicitud aceptada correctamente.'})
 
 @app.route('/iniciar_movimiento_manual', methods=['POST'])
 def iniciar_movimiento_manual():
@@ -808,20 +652,10 @@ def admin_logout():
 
 @app.route('/cancelar_solicitud', methods=["POST"])
 def cancelar_solicitud():
-    # ===== INICIO PARCHE CANCELAR SOLICITUD (RUTA COMPLETA) =====
-
-    # 1) Obtener cliente_id de la sesión (soporta ambos nombres)
-    cliente_id = session.get("cliente_id") or session.get("usuario_id")
+    cliente_id = session.get("cliente_id")
     if not cliente_id:
         return jsonify({'message': 'No hay cliente en sesión'}), 401
 
-    # 2) Normalizar a int si llega como string
-    try:
-        cliente_id = int(cliente_id)
-    except Exception:
-        pass
-
-    # 3) Buscar solicitud activa del cliente
     solicitud = Solicitud.query.filter(
         Solicitud.cliente_id == cliente_id,
         Solicitud.estado != 'finalizado'
@@ -830,63 +664,36 @@ def cancelar_solicitud():
     if not solicitud:
         return jsonify({'message': 'No se encontró una solicitud activa para cancelar.'}), 404
 
-    # 4) Guardar datos antes de borrar
+    lavador_asignado_id = solicitud.lavador_id
+    cliente = Usuario.query.get(solicitud.cliente_id)
+
     solicitud_id = solicitud.id
-    lavador_id = solicitud.lavador_id
+    db.session.delete(solicitud)
+    db.session.commit()
 
-    cliente = Usuario.query.get(cliente_id)
-    lavador = Usuario.query.get(lavador_id) if lavador_id else None
+    # ✅ Avisar al lavador asignado (si existía)
+    if lavador_asignado_id:
+        socketio.emit('notificacion_lavador', {
+            'titulo': 'Solicitud cancelada',
+            'mensaje': f'El cliente {cliente.nombre} canceló la solicitud.'
+        }, room=f'lavador_{lavador_asignado_id}')
 
-    # 5) Borrar solicitud
-    try:
-        db.session.delete(solicitud)
-        db.session.commit()
-    except Exception as e:
-        db.session.rollback()
-        print("❌ ERROR DB cancelar_solicitud:", e)
-        return jsonify({'message': 'Error cancelando la solicitud.'}), 500
-
-    # 6) Emitir evento de cancelación (estable)
-    payload = {
-        "cliente_id": cliente_id,
-        "solicitud_id": solicitud_id,
-        "lavador_id": lavador_id
-    }
-
-    # 6.1) Global (a todos)
-    try:
-        socketio.emit("solicitud_cancelada", payload)
-        print("✅ Emit solicitud_cancelada GLOBAL:", payload)
-    except Exception as e:
-        print("❌ ERROR emit solicitud_cancelada GLOBAL:", e)
-
-    # 6.2) A la room del lavador asignado (por si el frontend escucha solo en room)
-    if lavador_id:
-        try:
-            socketio.emit("solicitud_cancelada", payload, room=f"lavador_{lavador_id}")
-            print("✅ Emit solicitud_cancelada ROOM:", f"lavador_{lavador_id}", payload)
-        except Exception as e:
-            print("❌ ERROR emit solicitud_cancelada ROOM:", e)
-
-    # 7) Notificación al lavador asignado (si existía)
-    if lavador_id and lavador:
-        try:
-            socketio.emit('notificacion_lavador', {
-                'titulo': 'Solicitud cancelada',
-                'mensaje': f'El cliente {cliente.nombre if cliente else "cliente"} canceló la solicitud.'
-            }, room=f"lavador_{lavador_id}")
-        except Exception as e:
-            print("❌ ERROR emit notificacion_lavador:", e)
+    # ✅ Avisar a TODOS los lavadores para que limpien su UI (franja/botón)
+    lavadores = Usuario.query.filter_by(rol='lavador').all()
+    for lav in lavadores:
+        socketio.emit('solicitud_cancelada', {
+            'solicitud_id': solicitud_id,
+            'cliente_id': cliente_id,
+            'lavador_id': lavador_asignado_id
+        }, room=f'lavador_{lav.id}')
 
     return jsonify({'message': 'Solicitud cancelada correctamente.'})
-
-    # ===== FIN PARCHE CANCELAR SOLICITUD =====
 
 @app.route('/terminos')
 def terminos():
     return render_template('terminos.html')
 
-@app.route('/splash')
+@app.route('/')
 def splash():
     return render_template('splash.html')
 
@@ -919,94 +726,47 @@ def manejar_union_sala(data):
     emit("union_confirmada", {"sala": room})
 # 🔧 FIN PARCHE UNION SALA (SERVIDOR)
 
-@socketio.on("unirse_chat")
-def unirse_chat(data):
-    sala = (data or {}).get("sala")
-    if not sala or not isinstance(sala, str) or not sala.startswith("chat_"):
-        emit("union_error", {"motivo": "sala inválida o vacía"})
-        return
-    join_room(sala)
-    print(f"🟢 Usuario unido a sala de chat: {sala}")
-    emit("unido_chat", {"sala": sala})
-# ✅ NUEVO: cada usuario (cliente o lavador) entra a su sala "user_{id}"
-
-@socketio.on("unirse_sala_mensajes")
-def unirse_sala_mensajes(data):
-    uid = data.get("user_id")
-    if not uid:
-        return
-    try:
-        uid = int(uid)
-    except Exception:
-        pass
-    room = f"user_{uid}"
-    join_room(room)
-    emit("union_confirmada", {"sala": room})
-
-# ===========================
-# INICIO PARCHE: enviar_mensaje_privado (IDs a int + sala correcta)
-# ===========================
 @socketio.on("enviar_mensaje_privado")
 def manejar_mensaje_privado(data):
-    # Validación básica
-    if not isinstance(data, dict) or not all(k in data for k in ("cliente_id", "lavador_id", "autor_id", "mensaje")):
+    if not all(k in data for k in ("cliente_id", "lavador_id", "autor_id", "mensaje")):
         print("❌ Datos incompletos en el mensaje:", data)
-        emit("error_chat", {"motivo": "payload incompleto"})
         return
 
-    # ⚠️ Casteo a int para evitar comparaciones lexicográficas
-    try:
-        cliente_id = int(data["cliente_id"])
-        lavador_id = int(data["lavador_id"])
-        autor_id   = int(data["autor_id"])
-    except Exception:
-        emit("error_chat", {"motivo": "IDs no numéricos"})
-        return
+    cliente_id = data["cliente_id"]
+    lavador_id = data["lavador_id"]
+    autor_id = data["autor_id"]
+    mensaje = data["mensaje"]
+    sala = f"chat_{min(cliente_id, lavador_id)}_{max(cliente_id, lavador_id)}"
 
-    mensaje = (data.get("mensaje") or "").strip()
-    if not mensaje:
-        emit("error_chat", {"motivo": "mensaje vacío"})
-        return
+    # Emitir mensaje en tiempo real
+    emit("recibir_mensaje_privado", {
+        "mensaje": mensaje,
+        "autor_id": autor_id
+    }, room=sala)
 
-    # Sala canónica: chat_<menor>_<mayor>
-    menor = min(cliente_id, lavador_id)
-    mayor = max(cliente_id, lavador_id)
-    sala  = f"chat_{menor}_{mayor}"
-
-    # Emitir mensaje en tiempo real a la sala del chat
-    payload = {
-        "mensaje":    mensaje,
-        "autor_id":   autor_id,
-        "cliente_id": cliente_id,
-        "lavador_id": lavador_id,
-        "sala":       sala,
-    }
-    emit("recibir_mensaje_privado", payload, room=sala)
-
-    # Notificación directa (siempre IDs int coherentes)
+    # Enviar también al usuario directo para notificación
     destinatario_id = lavador_id if autor_id == cliente_id else cliente_id
-    try:
-        emitir_mensaje_directo(destinatario_id, mensaje)
-    except Exception as e:
-        print("⚠️ emitir_mensaje_directo falló:", e)
+    emitir_mensaje_directo(destinatario_id, mensaje)
 
-    # Guardar en DB
-    nuevo = Mensaje(de_id=autor_id, para_id=destinatario_id, texto=mensaje)
+    # Guardar mensaje en la base de datos
+    nuevo = Mensaje(
+        de_id=autor_id,
+        para_id=destinatario_id,
+        texto=mensaje
+    )
     db.session.add(nuevo)
 
-    # Marcar burbuja en la solicitud aceptada (match en cualquier orden)
+    # Marcar solicitud como con mensajes nuevos si existe
     solicitud = Solicitud.query.filter(
         ((Solicitud.cliente_id == cliente_id) & (Solicitud.lavador_id == lavador_id)) |
         ((Solicitud.cliente_id == lavador_id) & (Solicitud.lavador_id == cliente_id)),
         Solicitud.estado == 'aceptado'
     ).first()
+
     if solicitud:
         solicitud.tiene_mensajes_nuevos = True
 
     db.session.commit()
-# ===========================
-# FIN PARCHE: enviar_mensaje_privado
-# ===========================
 
 @socketio.on('connect')
 def handle_connect():
@@ -1077,10 +837,8 @@ def actualizar_ubicacion_cliente(data):
             print(f"📍 Ubicación actualizada para cliente {cliente_id}: {lat}, {lng}")
             # También podemos emitir al lavador para que se actualice el marcador del cliente
             socketio.emit("actualizar_ubicacion_cliente", {
-                "cliente_id": cliente_id,
                 "latitud": lat,
-                "longitud": lng,
-                "mensaje": "El lavador ha aceptado tu solicitud y va en camino."
+                "longitud": lng
             }, room=f"lavador_{solicitud.lavador_id}")
 
 @app.route('/solicitud_activa')
@@ -1122,7 +880,8 @@ def ver_calificaciones(lavador_id):
         })
     return jsonify(resultado)
 
-@app.route('/chat')
+
+@app.route('/chat')  
 def chat():
     rol = request.args.get('rol')
 
@@ -1130,17 +889,9 @@ def chat():
         cliente_id = session.get('cliente_id')
         if cliente_id:
             cliente = Usuario.query.get(cliente_id)
-            solicitud = Solicitud.query.filter_by(
-                cliente_id=cliente.id, estado='aceptado'
-            ).first()
+            solicitud = Solicitud.query.filter_by(cliente_id=cliente.id, estado='aceptado').first()
 
             if solicitud:
-                # ===== INICIO PARCHE RESET BURBUJA (cliente abre chat) =====
-                if getattr(solicitud, "tiene_mensajes_nuevos", False):
-                    solicitud.tiene_mensajes_nuevos = False
-                    db.session.commit()
-                # ===== FIN PARCHE RESET BURBUJA =====
-
                 lavador = Usuario.query.get(solicitud.lavador_id)
                 sala = f"chat_{min(cliente.id, lavador.id)}_{max(cliente.id, lavador.id)}"
                 titulo_chat = f"Chat con {lavador.nombre} (Lavador)"
@@ -1154,24 +905,16 @@ def chat():
                     sala=sala
                 )
 
-        # Si no hay solicitud válida
+        # ❌ Si no hay solicitud válida, redirigir
         return redirect('/cliente_dashboard')
 
     elif rol == 'lavador':
         lavador_id = session.get('lavador_id')
         if lavador_id:
             lavador = Usuario.query.get(lavador_id)
-            solicitud = Solicitud.query.filter_by(
-                lavador_id=lavador.id, estado='aceptado'
-            ).first()
+            solicitud = Solicitud.query.filter_by(lavador_id=lavador.id, estado='aceptado').first()
 
             if solicitud:
-                # ===== INICIO PARCHE RESET BURBUJA (lavador abre chat) =====
-                if getattr(solicitud, "tiene_mensajes_nuevos", False):
-                    solicitud.tiene_mensajes_nuevos = False
-                    db.session.commit()
-                # ===== FIN PARCHE RESET BURBUJA =====
-
                 cliente = Usuario.query.get(solicitud.cliente_id)
                 sala = f"chat_{min(cliente.id, lavador.id)}_{max(cliente.id, lavador.id)}"
                 titulo_chat = f"Chat con {cliente.nombre} (Cliente)"
@@ -1185,7 +928,7 @@ def chat():
                     sala=sala
                 )
 
-        # Si no hay solicitud válida
+        # ❌ Si no hay solicitud válida, redirigir
         return redirect('/lavador_dashboard')
 
     return redirect('/')
@@ -1273,31 +1016,13 @@ def actualizar_ubicacion_lavador():
         return jsonify({"error": "Coordenadas inválidas"}), 400
 
     lavador = Usuario.query.get(user_id)
-    if not lavador:
-        return jsonify({"error": "Lavador no encontrado"}), 404
+    if lavador:
+        lavador.latitud = lat
+        lavador.longitud = lng
+        db.session.commit()
+        return jsonify({"success": True})
 
-    # 1) Guardar en BD
-    lavador.latitud = lat
-    lavador.longitud = lng
-    db.session.commit()
-
-    # 2) Buscar solicitud aceptada de ESTE lavador
-    solicitud = Solicitud.query.filter_by(lavador_id=user_id, estado='aceptado').first()
-
-    # 3) Si hay cliente asignado, EMITIR a su sala para que vea el movimiento en vivo
-    if solicitud:
-        socketio.emit(
-            "ubicacion_lavador",
-            {
-                "cliente_id": solicitud.cliente_id,  # útil para filtrar en front si quieres
-                "lavador_id": user_id,
-                "latitud": lat,
-                "longitud": lng
-            },
-            room=f"user_{solicitud.cliente_id}"
-        )
-
-    return jsonify({"success": True})
+    return jsonify({"error": "Lavador no encontrado"}), 404
     
 @app.get("/debug_emit/<int:lavador_id>")
 def debug_emit(lavador_id):

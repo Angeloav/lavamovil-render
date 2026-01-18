@@ -8,6 +8,7 @@
   <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
   
   <title>Cliente - LavaMovil</title>
+  <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBmVCNKb_sjx-vE5b1YoJpPUgm8Ub09ElE&callback=initMap"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
     body {
@@ -136,151 +137,50 @@
   <audio id="sonidoMensaje" src="/static/sounds/nuevo_mensaje.mp3"></audio>
 
   <!-- ==================== SCRIPT PRINCIPAL ==================== -->
-<script>
-  const socket         = io();
-  // ===== INICIO PARCHE: socket global =====
-  window.socket = socket;
-  // ===== FIN PARCHE =====
-  const clienteId      = {{ cliente.id }};
-  let lavadorId        = {{ solicitud_activa.lavador_id if solicitud_activa else 'null' }};
-  const tieneSolicitud = {{ 'true' if solicitud_activa else 'false' }};
+  <script>
+    const socket         = io();
+    const clienteId      = {{ cliente.id }};
+    let lavadorId      = {{ solicitud_activa.lavador_id if solicitud_activa else 'null' }};
+    const tieneSolicitud = {{ 'true' if solicitud_activa else 'false' }};
 
-  let map, lavadorMarker, clienteMarker, rutaPolyline;
-  let ubicacionInicialGuardada = false;
-  let solicitudAceptada = tieneSolicitud;
+    let map, lavadorMarker, clienteMarker, rutaPolyline;
+    let ubicacionInicialGuardada = false;
+    let solicitudAceptada = tieneSolicitud; // ← AQUÍ: inicializamos con base en la data del servidor
 
-  if (solicitudAceptada) {
-    document.getElementById("mensajeLavador").style.display = "block";
-  }
-
-  socket.on("notificacion_cliente", (data) => {
-    if (data.cliente_id === clienteId && data.mensaje) {
+    // Avisar al cliente visualmente si ya había una solicitud aceptada antes de recargar
+    if (solicitudAceptada) {
       document.getElementById("mensajeLavador").style.display = "block";
-      solicitudAceptada = true;
-      // 🔧 PARCHE: unir chat si trae lavador_id
-      if (data.lavador_id) lavadorId = data.lavador_id;
-      joinSalaChatClienteSiListo();
     }
-  });
 
-  if (lavadorId && lavadorId !== "null" && lavadorId !== "none") {
-    socket.emit("unirse_sala_privada", { cliente_id: clienteId, lavador_id: lavadorId });
-  }
+    // Cuando el lavador acepta, el server envía este mensaje
+    socket.on("notificacion_cliente", (data) => {
+      if (data.cliente_id === clienteId && data.mensaje) {
+        document.getElementById("mensajeLavador").style.display = "block";
+        solicitudAceptada = true;
 
-  socket.on("iniciar_movimiento", (data) => {
-    if (data.cliente_id === clienteId && data.lavador_id === lavadorId) {
-      solicitudAceptada = true;
-      // 🔧 PARCHE: actualizar lavadorId y unir chat
-      if (data.lavador_id) lavadorId = data.lavador_id;
-      joinSalaChatClienteSiListo();
+        // ✅ Si el server manda el lavador_id, lo guardamos para poder trazar ruta sin recargar
+        if (data.lavador_id) {
+          lavadorId = data.lavador_id;
+          socket.emit("unirse_sala_privada", { cliente_id: clienteId, lavador_id: lavadorId });
+          iniciarMovimientoCarritoCamioncito();
+        }
+      }
+    });
+
+    // Unirse a la sala privada para recibir "iniciar_movimiento"
+    if (lavadorId !== null) {
+      socket.emit("unirse_sala_privada", {
+        cliente_id: clienteId,
+        lavador_id: lavadorId
+      });
     }
-  });
 
-  socket.on("nueva_solicitud_aceptada", (data) => {
-    if (data && data.cliente_id === clienteId && data.lavador_id) {
-      lavadorId = data.lavador_id;
-      solicitudAceptada = true;
-      socket.emit("unirse_sala_privada", { cliente_id: clienteId, lavador_id: lavadorId });
-      joinSalaChatClienteSiListo();
-    }
-  });
+    socket.on("iniciar_movimiento", (data) => {
+      if (data.cliente_id === clienteId && data.lavador_id === lavadorId) {
+        solicitudAceptada = true;
+      }
+    });
 
-  // =======================
-  // INICIO PARCHE CHAT CLIENTE
-  // =======================
-  let unidoChatCliente = false;
-
-  function joinSalaChatClienteSiListo() {
-    if (!lavadorId || lavadorId === "null" || lavadorId === "none") return;
-    const C = Number(clienteId), L = Number(lavadorId);
-    if (!Number.isFinite(C) || !Number.isFinite(L)) return;
-
-    const sala = `chat_${Math.min(C, L)}_${Math.max(C, L)}`;
-    if (!unidoChatCliente) {
-      socket.emit("unirse_chat", { sala });
-      unidoChatCliente = true;
-      console.log("✅ Cliente unido a", sala);
-    }
-  }
-
-  socket.on("connect", () => {
-    unidoChatCliente = false;
-    joinSalaChatClienteSiListo();
-
-    const t = setInterval(() => {
-      if (unidoChatCliente) return clearInterval(t);
-      joinSalaChatClienteSiListo();
-    }, 1000);
-  });
-
-  socket.on("disconnect",        () => { unidoChatCliente = false; });
-  socket.on("reconnect",         () => { unidoChatCliente = false; joinSalaChatClienteSiListo(); });
-  socket.on("reconnect_attempt", () => { unidoChatCliente = false; });
-
-  setInterval(() => {
-    if (!unidoChatCliente) joinSalaChatClienteSiListo();
-  }, 15000);
-
-  socket.on("recibir_mensaje_privado", (data) => {
-    console.log("📥 (cliente) mensaje:", data);
-    const box = document.getElementById("mensajes") || document.body;
-    const p = document.createElement("p");
-    p.textContent = data.mensaje;
-    box.appendChild(p);
-    box.scrollTop = box.scrollHeight;
-  });
-  // =======================
-  // FIN PARCHE CHAT CLIENTE
-  // =======================
-
-</script>
-
-
-    <!-- ===== INICIO PARCHE: BLOQUE DUPLICADO ELIMINADO (chat cliente duplicado) ===== -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- (linea reservada) -->
-    <!-- ===== FIN PARCHE: BLOQUE DUPLICADO ELIMINADO ===== -->
-
-    <script>
     function initMap() {
       map = new google.maps.Map(document.getElementById('map'), {
         center: { lat: 19.4326, lng: -99.1332 },
@@ -341,10 +241,8 @@
     }
 
     window.initMap = initMap; // 👉 Esto hace visible la función para Google Maps
-    if (window.google && window.google.maps) { initMap(); }
-    </script>
-    
-    <script>
+
+    // Y si quieres que el carrito se mueva desde el inicio:
     if (solicitudAceptada) {
     iniciarMovimientoCarritoCamioncito();
     }
@@ -521,96 +419,35 @@
       }
     });
 
+    document.addEventListener('click', () => {
+      const sonido = document.getElementById("sonidoMensaje");
+      if (sonido) sonido.play().catch(() => {});
+    }, { once: true });
+
     setInterval(() => {
-      fetch("/verificar_mensajes_nuevos", {
-        method: "GET",
-        credentials: "include",
-        cache: "no-store"
+      fetch("/verificar_mensajes_nuevos", { credentials: 'include' })
+      .then(res => {
+        if (!res.ok) console.error("❌ /verificar_mensajes_nuevos devolvió código:", res.status);
+        return res.json();
       })
-      .then(res => res.ok ? res.json() : Promise.reject(res))
       .then(data => {
-        if (!data) return;
-        const btn = document.getElementById("botonChatCliente")   // 👈 usa el id real del botón del cliente
-                 || document.getElementById("botonChat");         // fallback si tu botón se llama así
-        if (data.mensajes_nuevos && btn && !document.getElementById("burbujaChatCliente")) {
-          const b = document.createElement("span");
-          b.id = "burbujaChatCliente";
-          b.textContent = "🔴";
-          b.style.marginLeft = "6px";
-          btn.appendChild(b);
+        if (data.mensajes_nuevos && !document.getElementById("burbujaChat")) {
+          const burbuja = document.createElement("span");
+          burbuja.textContent = "🔴";
+          burbuja.id = "burbujaChat";
+          burbuja.style.marginLeft = "5px";
+          const boton = document.getElementById("botonChat");
+          if (boton) boton.appendChild(burbuja);
         }
       })
-      .catch(err => console.error("✘ verificar_mensajes_nuevos (cliente):", err.status || err, err.statusText || ""));
+      .catch(err => console.error("❌ Error en verificar_mensajes_nuevos():", err));
     }, 5000);
-</script>
-<script>
-let markerLavador; // si no lo tienes ya
+  </script>
 
-function actualizarMarcadorLavador(lat, lng) {
-  if (!window.map) return;
-  const pos = { lat: Number(lat), lng: Number(lng) };
-  if (!markerLavador) {
-    markerLavador = new google.maps.Marker({
-      position: pos,
-      map: map,
-      title: "Lavador",
-      icon: { url: "/static/icons/camioncito_icono.png",
-              scaledSize: new google.maps.Size(50, 50) }
-    });
-    map.setCenter(pos);
-  } else {
-    markerLavador.setPosition(pos);
-  }
-}
-
-// 👇 NUEVO: escucha la actualización “push” del lavador usando la sala de mensajes
-socket.on("ubicacion_lavador", (data) => {
-  // (opcional) si emites cliente_id, filtra:
-  if (data?.cliente_id && data.cliente_id !== clienteId) return;
-
-  const lat = data?.latitud ?? data?.lat;
-  const lng = data?.longitud ?? data?.lng;
-  if (lat != null && lng != null) {
-    actualizarMarcadorLavador(lat, lng);
-  }
-});
-</script>
   
 <!-- ==================== SCRIPT SECUNDARIO: GEOLOCALIZACIÓN CÍCLICA ==================== -->
-<!-- INICIO PARCHE GEO ÚNICO (CLIENTE) -->
 <script>
-  // Evita doble inicialización
-  if (!window._geoInitCliente) {
-    window._geoInitCliente = true;
-
-    // Pide 1 lectura al cargar (puedes dejar solo el intervalo si prefieres)
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        guardarUbicacionAlCargar,          // acepta 'position'
-        errorUbicacion,
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 12000 }
-      );
-    }
-  }
-
-  // Función unificada: acepta (position) o (lat,lng)
-  function guardarUbicacionAlCargar(a, b) {
-    let lat, lng;
-
-    if (a && typeof a === "object" && a.coords) {
-      lat = a.coords.latitude;
-      lng = a.coords.longitude;
-    } else {
-      lat = a;
-      lng = b;
-    }
-
-    if (typeof lat !== "number" || typeof lng !== "number") {
-      console.warn("⚠️ Coordenadas inválidas en guardarUbicacionAlCargar:", { lat, lng, a, b });
-      return;
-    }
-
-    // 1) Guardar en backend por fetch (como ya hacías)
+  function guardarUbicacionAlCargar(lat, lng) {
     fetch('/actualizar_ubicacion_cliente', {
       method: 'POST',
       credentials: 'include',
@@ -618,50 +455,43 @@ socket.on("ubicacion_lavador", (data) => {
       body: JSON.stringify({ latitud: lat, longitud: lng })
     })
     .then(res => {
-      if (!res.ok) {
-        console.error("✘ /actualizar_ubicacion_cliente:", res.status, res.statusText);
-        return;
-      }
+      if (!res.ok) console.error("❌ /actualizar_ubicacion_cliente devolvió:", res.status);
       return res.json();
     })
     .then(data => {
-      if (data) console.log("✔ Ubicación guardada:", data);
+      console.log("📍 Ubicación inicial guardada:", data);
     })
-    .catch(err => console.error("✘ Error guardando ubicación:", err));
+    .catch(err => console.error("❌ Error al guardar ubicación inicial:", err));
+  }
 
-    // 2) Emitir por Socket.IO (si está disponible)
-    try {
-      if (window.socket && typeof window.socket.emit === "function") {
-        window.socket.emit("actualizar_ubicacion_cliente", {
+  function enviarUbicacionCliente() {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(pos => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+
+        socket.emit("actualizar_ubicacion_cliente", {
           cliente_id: {{ cliente.id }},
           latitud: lat,
           longitud: lng
         });
-      }
-    } catch (e) { console.warn("⚠️ Emisión socket falló:", e); }
+
+        console.log("📤 Cliente envió ubicación:", lat, lng);
+      });
+    }
   }
 
-  function errorUbicacion(err){
-    console.warn("⚠️ Geoloc:", err && err.message ? err.message : err);
-  }
-
-  // Tu función periódica sigue igual, pero ahora reusa la unificada:
-  function enviarUbicacionCliente() {
-    if (!("geolocation" in navigator)) return;
-    navigator.geolocation.getCurrentPosition(pos => {
-      const lat = pos.coords.latitude;
-      const lng = pos.coords.longitude;
-      console.log("📤 Cliente envió ubicación:", lat, lng);
-      guardarUbicacionAlCargar(lat, lng); // ← reusa la misma
-    }, errorUbicacion, { enableHighAccuracy: true, maximumAge: 0, timeout: 12000 });
-  }
-
-  // Mantén tu intervalo
   setInterval(enviarUbicacionCliente, 5000);
 
+  // Definir los datos del cliente en JavaScript de forma segura
+ const clienteInfo = {
+    id: {{ cliente.id }},
+    nombre: "{{ cliente.nombre }}",
+    apellido: "{{ cliente.apellido }}",
+    telefono: "{{ cliente.telefono }}"
+  };
+
 </script>
-<!-- FIN PARCHE GEO ÚNICO (CLIENTE) -->
-<script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBmVCNKb_sjx-vE5b1YoJpPUgm8Ub09ElE&callback=initMap"></script>
 
 </body>
 </html>
