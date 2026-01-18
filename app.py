@@ -575,7 +575,14 @@ def solicitudes_activas():
 
 @app.route('/aceptar_solicitud')
 def aceptar_solicitud():
-print("🔥 ENTRO A /aceptar_solicitud", request.args, "session.lavador_id=", session.get("lavador_id"))
+    # 🔥 MARCA DE ENTRADA (DEBUG)
+    print(
+        "🔥 ENTRO A /aceptar_solicitud",
+        request.args,
+        "session.lavador_id=",
+        session.get("lavador_id")
+    )
+
     if 'lavador_id' not in session:
         return jsonify({'error': 'No autorizado'}), 401
 
@@ -594,47 +601,55 @@ print("🔥 ENTRO A /aceptar_solicitud", request.args, "session.lavador_id=", se
     if not lavador:
         return jsonify({'error': 'Lavador no encontrado'}), 404
 
-    # ✅ Asignar el lavador a la solicitud
+    # ✅ ASIGNAR SOLICITUD AL LAVADOR
     solicitud.lavador_id = lavador.id
     solicitud.estado = 'aceptado'
 
-    # 🔴 Mantener tu parche de burbuja
+    # 🔴 Mantener tu lógica de burbuja de mensajes
     solicitud.tiene_mensajes_nuevos = True
 
     db.session.commit()
-    print("🔥 COMMIT OK solicitud_id=", solicitud.id, "cliente_id=", solicitud.cliente_id, "lavador_id=", lavador.id)
 
-    # ✅ AVISO A TODOS LOS LAVADORES: "YA FUE ACEPTADA, LIMPIEN"
+    print(
+        "🔥 COMMIT OK",
+        "solicitud_id=", solicitud.id,
+        "cliente_id=", solicitud.cliente_id,
+        "lavador_id=", lavador.id
+    )
+
+    # ✅ EMIT GLOBAL → TODOS LOS LAVADORES DEBEN LIMPIAR
     payload = {
-        'lavador_id': lavador.id,
+        'solicitud_id': solicitud.id,
         'cliente_id': solicitud.cliente_id,
-        'solicitud_id': solicitud.id
+        'lavador_id': lavador.id
     }
 
     try:
-        payload = {'lavador_id': lavador.id, 'cliente_id': solicitud.cliente_id, 'solicitud_id': solicitud.id}
-        socketio.emit("nueva_solicitud_aceptada", payload)  # sin room = a todos en el namespace
+        socketio.emit("nueva_solicitud_aceptada", payload)
         print("🔥 EMIT nueva_solicitud_aceptada:", payload)
     except Exception as e:
-        print("❌ ERROR broadcast nueva_solicitud_aceptada:", e)
+        print("❌ ERROR emit nueva_solicitud_aceptada:", e)
 
-    # ✅ Notificación al cliente
+    # ✅ NOTIFICACIÓN AL CLIENTE
     cliente = Usuario.query.get(solicitud.cliente_id)
     if cliente:
         try:
-            socketio.emit('notificacion_cliente', {
-                'cliente_id': cliente.id,
-                'mensaje': 'El lavador ha aceptado tu solicitud y va en camino.'
-            })
+            socketio.emit(
+                'notificacion_cliente',
+                {
+                    'cliente_id': cliente.id,
+                    'mensaje': 'El lavador ha aceptado tu solicitud y va en camino.'
+                }
+            )
         except Exception as e:
             print("❌ ERROR emit notificacion_cliente:", e)
 
-    print(f"🧩 Solicitud {solicitud_id} aceptada por lavador {lavador.id}")
+    print(f"🧩 Solicitud {solicitud.id} aceptada por lavador {lavador.id}")
 
     return jsonify({
         'message': 'Solicitud aceptada correctamente.',
-        'cliente_id': solicitud.cliente_id,
         'solicitud_id': solicitud.id,
+        'cliente_id': solicitud.cliente_id,
         'lavador_id': lavador.id
     })
 
