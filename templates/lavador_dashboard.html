@@ -5,7 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Panel del Lavador - LavaMovil</title>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-<style>
+  <!-- 🔧 INICIO PARCHE: definir clienteId -->
+  <script>
+    const clienteIdEl = document.getElementById("clienteData");
+    let clienteId = clienteIdEl ? clienteIdEl.dataset.id : "none";
+  </script>
+  <!-- 🔧 FIN PARCHE -->
+
+  <style>
     body { font-family: 'Segoe UI', sans-serif; background-color: #121212; color: #ffffff; margin: 0; padding: 0; text-align: center; }
     h1 { color: #ffffff; font-size: 24px; margin-top: 20px; } p { color: #ffffff; } #estado { color: #ffffff; }
     #map { width: 90%; max-width: 360px; height: 250px; border-radius: 20px; margin: 20px auto; border: 1px solid #333; box-shadow: 0 4px 10px rgba(0,0,0,0.4); }
@@ -19,7 +26,7 @@
     .inactivo:hover { background-color: #a71d2a; }    
     .cerrar:hover { background-color: #1d2124; }
     .vercal:hover { background-color: #0056b3; }
-    #franjaSolicitud {
+    #notificacion {
       display: none;
       background-color: #ffc107;
       padding: 15px;
@@ -28,7 +35,6 @@
       margin-bottom: 10px;
       font-weight: bold;
     }
-
     #estado { margin-bottom: 10px; font-size: 15px; color: #ffffff; }
     .calificacion-box { background-color: #1e1e1e; border: 1px solid #555; margin: 20px auto; padding: 15px; border-radius: 12px; max-width: 360px; text-align: left; display: none; color: #ffffff; box-sizing: border-box; width: 85%; }
     .aceptar {
@@ -60,7 +66,7 @@
 <div id="estadoSolicitud" data-aceptada="{{ 'true' if solicitud_activa and solicitud_activa.estado == 'aceptado' else 'false' }}"></div>
 
 
-<div id="franjaSolicitud">🟡 Nueva solicitud recibida</div>
+<div id="notificacion">¡Nueva solicitud recibida!</div>
 <div id="map"></div>
 
 <button class="activo" onclick="cambiarEstado('activo')">🔔 Activar</button>
@@ -70,6 +76,7 @@
 
 <form action="/chat" method="get">
   <input type="hidden" name="rol" value="lavador">
+  <input type="hidden" name="cliente_id" id="clienteIdHidden" value="">
   <button id="botonChat" type="submit" style="background-color: #6c63ff; color: white; padding: 10px; border-radius: 10px;">
     💬 Chat con Cliente
   </button>
@@ -77,12 +84,9 @@
 
 <script>
 function abrirChat() {
-  const lavadorId = {{ lavador.id }};
-  if (clienteId !== "none" ) {
-    window.location.href = `/chat_privado/${clienteId}/${lavadorId}`;
-  } else {
-    alert("❌ No hay una solicitud activa.");
-  }
+  // tu lógica actual para abrir modal/chat…
+  const b = document.getElementById("burbujaChat");
+  if (b) b.remove();
 }
 </script>
 
@@ -92,266 +96,412 @@ function abrirChat() {
 
 <!-- 🔧 INICIO PARCHE FRONT -->
 <script>
-  const socket = io(window.location.origin, {
+  // socket global
+  window.socket = io(window.location.origin, {
     transports: ["websocket","polling"],
     reconnection: true,
     reconnectionAttempts: 10
   });
 
-  const lavadorId = {{ lavador.id|tojson }};
+  // IDs
+  const lavadorId  = {{ lavador.id|tojson }};
+  const LAVADOR_ID = Number({{ lavador.id|tojson }});
 
-  // 🔧 INICIO CAMBIO: clienteId persistente + tracking de solicitud actual
-  let clienteId = (localStorage.getItem('clienteId_actual') || (document.getElementById('clienteData')?.dataset.id) || 'none');
-  if (clienteId === 'null' || clienteId === 'undefined') clienteId = 'none';
-  let solicitudActualId = null;
-  // 🔧 FIN CAMBIO
+  // estado de unión al chat
+  let yaUnidoChat = false;
 
+  // ======== unión robusta a sala chat_<menor>_<mayor>
+  function joinSalaChatSiListo() {
+    // clienteId debe existir en el dashboard (lo seteas cuando llega la solicitud/aceptación)
+    if (typeof clienteId === "undefined" || clienteId === null || clienteId === "none") return;
 
-  socket.on("connect", () => {
-    console.log("🟢 Socket conectado:", socket.id);
-    socket.emit("unirse_sala_privada", { lavador_id: lavadorId });
-  });
+    const C = Number(clienteId);
+    const L = Number(LAVADOR_ID);
+    if (!Number.isFinite(C) || !Number.isFinite(L)) return;
 
-  socket.on("union_confirmada", (d) => {
-    console.log("✅ Unido a sala:", d && d.sala ? d.sala : d);
-   // No mostrar franja aquí. La franja amarilla es SOLO para nueva_solicitud. 
-  });
-    
-  // 🔧 INICIO CAMBIO: limpieza inmediata en otros lavadores
-  socket.on('nueva_solicitud_aceptada', (data) => {
-    try {
-      if (!data) return;
-      if (solicitudActualId && data.solicitud_id && String(data.solicitud_id) !== String(solicitudActualId)) return;
-
-      // Si otro lavador aceptó ESTA solicitud, limpiamos la franja + botón
-      if (data.lavador_id && String(data.lavador_id) !== String(lavadorId)) {
-        console.log('🧹 Otra persona aceptó la solicitud. Limpiando UI...');
-        solicitudActualId = null;
-        clienteId = 'none';
-        localStorage.removeItem('clienteId_actual');
-        const cd = document.getElementById('clienteData');
-        if (cd) cd.dataset.id = 'none';
-        const n = document.getElementById('notificacion');
-        if (n) n.style.display = 'none';
-        const s = document.getElementById('solicitudes');
-        if (s) s.innerHTML = '';
-      }
-    } catch (e) {
-      console.warn('nueva_solicitud_aceptada error:', e);
+    const sala = `chat_${Math.min(C, L)}_${Math.max(C, L)}`;
+    if (!yaUnidoChat) {
+      window.socket.emit("unirse_chat", { sala });
+      yaUnidoChat = true;
+      console.log("✅ Lavador unido a", sala);
     }
-  });
-
-  socket.on('solicitud_cancelada', (data) => {
-    try {
-      if (!data) return;
-      if (solicitudActualId && data.solicitud_id && String(data.solicitud_id) !== String(solicitudActualId)) return;
-      console.log('🧹 Solicitud cancelada. Limpiando UI...');
-      solicitudActualId = null;
-      clienteId = 'none';
-      localStorage.removeItem('clienteId_actual');
-      const cd = document.getElementById('clienteData');
-      if (cd) cd.dataset.id = 'none';
-      const n = document.getElementById('notificacion');
-      if (n) n.style.display = 'none';
-      const s = document.getElementById('solicitudes');
-      if (s) s.innerHTML = '';
-    } catch (e) {
-      console.warn('solicitud_cancelada error:', e);
-    }
-  });
-  // 🔧 FIN CAMBIO
-
-socket.on("nueva_solicitud", function(data) {
-  console.log("📨 Solicitud recibida del cliente:", data);
-  solicitudActualId = data && data.solicitud_id ? data.solicitud_id : null;
-
-  // 🔄 Actualizar clienteId dinámicamente al recibir solicitud
-  document.getElementById("clienteData").dataset.id = data.cliente_id;
-  clienteId = data.cliente_id;
-  localStorage.setItem('clienteId_actual', String(clienteId));
-  console.log("🔄 clienteId actualizado dinámicamente:", clienteId);
-
-  document.getElementById("solicitudes").innerHTML = "";
-  const div = document.createElement('div');
-  div.innerHTML = `
-    <div><strong>${data.nombre} ${data.apellido}</strong><br>
-    Tel: ${data.telefono}<br>
-    <button id="botonAceptar_${data.solicitud_id}" class="aceptar" onclick="aceptar(${data.solicitud_id})">Aceptar</button></div>`;
-  document.getElementById("solicitudes").appendChild(div);
-
-  const franja = document.getElementById("franjaSolicitud");
-  if (franja) {
-    franja.style.display = "block";
-    franja.innerText = "🟡 Nueva solicitud recibida";
-    franja.style.opacity = "1";
   }
 
-  if (!intervaloCliente) {
-    intervaloCliente = setInterval(() => {
-      if (clienteId !== "none") obtenerUbicacionCliente();
-    }, 5000);
+  // al conectar: sala privada + rejoin chat
+  window.socket.on("connect", () => {
+    console.log("🟢 Socket conectado:", window.socket.id);
+
+    // sala privada del lavador
+    window.socket.emit("unirse_sala_privada", { lavador_id: lavadorId });
+
+    // rejoin al chat
+    yaUnidoChat = false;
+    joinSalaChatSiListo();
+
+    const timer = setInterval(() => {
+      if (yaUnidoChat) return clearInterval(timer);
+      joinSalaChatSiListo();
+    }, 1000);
+  });
+
+  // reconexiones: permitir rejoin siempre
+  window.socket.on("disconnect",        () => { yaUnidoChat = false; });
+  window.socket.on("reconnect",         () => { yaUnidoChat = false; joinSalaChatSiListo(); });
+  window.socket.on("reconnect_attempt", () => { yaUnidoChat = false; });
+
+  // rejoin defensivo cada 15s (por si algo se desincroniza)
+  setInterval(() => {
+    if (!yaUnidoChat) joinSalaChatSiListo();
+  }, 15000);
+
+  // recibir solicitud en vivo (actualiza clienteId y únete al chat)
+  window.socket.on("nueva_solicitud", (data) => {
+    console.log("📨 Solicitud recibida en lavador:", data);
+    if (data && data.cliente_id) {
+      // si tu UI ya lo setea en otro lado, no pasa nada por re-asignar
+      clienteId = data.cliente_id;
+      joinSalaChatSiListo();
+    }
+  });
+
+  // escuchar mensajes del chat
+  window.socket.on("recibir_mensaje_privado", (data) => {
+    console.log("📥 Mensaje recibido:", data);
+    const box = document.getElementById("mensajes") || document.body;
+    const p = document.createElement("p");
+    p.textContent = data.mensaje;
+    box.appendChild(p);
+    box.scrollTop = box.scrollHeight;
+  });
+</script>
+<!-- 🔧 FIN PARCHE FRONT -->
+
+<script>
+const socket = window.socket;
+
+let map, lavadorMarker, clienteMarker, rutaPolyline;
+
+function actualizarUbicacion(lat, lng) {
+  console.log("📡 Ubicación del lavador lista:", lat, lng);
+
+  if (window.socket && typeof window.socket.emit === "function") {
+    window.socket.emit("ubicacion_lavador", {
+      lavador_id: lavadorId,
+      latitud: lat,
+      longitud: lng
+    });
+  }
+
+  // ✅ GUARDAR EN EL BACKEND AHORA MISMO
+  fetch(`/actualizar_ubicacion_lavador?lat=${lat}&lng=${lng}`, {
+    credentials: 'include'
+  })
+  .then(res => res.json())
+  .then(data => console.log("📤 Lavador envió ubicación al servidor:", lat, lng))
+  .catch(err => console.warn("❌ Error guardando ubicación:", err));
+}
+
+function obtenerUbicacionCliente() {
+  if (!clienteId || clienteId === "none") return;
+
+  fetch(`/obtener_ubicacion_cliente?user_id=${clienteId}`, {
+    credentials: 'include'
+  })
+  .then(res => res.json())
+  .then(data => {
+    console.log("📍 Datos recibidos del cliente:", data);
+
+    if (data.lat && data.lng) {
+      const clientePos = { lat: data.lat, lng: data.lng };
+      if (!clienteMarker) {
+        clienteMarker = new google.maps.Marker({
+          position: clientePos,
+          map: map,
+          title: "Cliente",
+          icon: {
+            url: "/static/icons/carrito_icono.png",
+            scaledSize: new google.maps.Size(50, 50)
+          }
+        });
+      } else {
+        clienteMarker.setPosition(clientePos);
+      }
+
+      if (clienteMarker && lavadorMarker) {
+        if (rutaPolyline) rutaPolyline.setMap(null);
+        rutaPolyline = new google.maps.Polyline({
+          path: [lavadorMarker.getPosition(), clienteMarker.getPosition()],
+          geodesic: true,
+          strokeColor: "#00bfff",
+          strokeOpacity: 1.0,
+          strokeWeight: 3,
+          map: map
+        });
+      }
+    }
+  })
+  .catch(err => {
+    console.warn("❌ Error al obtener ubicación del cliente:", err);
+  });
+}
+
+function initMap() {
+  map = new google.maps.Map(document.getElementById('map'), {
+    center: { lat: 19.4326, lng: -99.1332 },
+    zoom: 15
+  });
+
+  const permisoUbicacion = confirm("🚗 LavaMovil necesita acceso a tu ubicación para encontrar al cliente. ¿Deseas permitirlo?");
+
+  if (!permisoUbicacion) {
+    console.warn("⚠️ Usuario no permitió ubicación, usando ubicación genérica.");
+    const fallback = { lat: 19.4326, lng: -99.1332 };
+    lavadorMarker = new google.maps.Marker({
+      position: fallback,
+      map: map,
+      title: "Ubicación simulada",
+      icon: {
+        url: "/static/icons/camioncito_icono.png",
+        scaledSize: new google.maps.Size(50, 50)
+      }
+    });
+    map.setCenter(fallback);
+    return;
+  }
+
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(position => {
+      console.log("📍 GPS OK:", position.coords.latitude, position.coords.longitude);
+      const posicion = { lat: position.coords.latitude, lng: position.coords.longitude };
+
+      lavadorMarker = new google.maps.Marker({
+        position: posicion,
+        map: map,
+        title: "Tu ubicación",
+        icon: {
+          url: "/static/icons/camioncito_icono.png",
+          scaledSize: new google.maps.Size(50, 50)
+        }
+      });
+
+      map.setCenter(posicion);
+      actualizarUbicacion(posicion.lat, posicion.lng);
+      obtenerUbicacionCliente();
+
+    }, error => {
+      console.warn("❌ Error GPS:", error.code, error.message);
+
+      const simulacion = { lat: 18.4861, lng: -69.9312 };
+
+      lavadorMarker = new google.maps.Marker({
+        position: simulacion,
+        map: map,
+        title: "Ubicación simulada",
+        icon: {
+          url: "/static/icons/camioncito_icono.png",
+          scaledSize: new google.maps.Size(50, 50)
+        }
+      });
+      map.setCenter(simulacion);
+
+      actualizarUbicacion(simulacion.lat, simulacion.lng);
+      obtenerUbicacionCliente();
+    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+  }
+} // ✅ FIN de initMap
+window.initMap = initMap;  // ✅ Esto registra la función globalmente
+
+</script>
+
+<script async defer
+  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBmVCNKb_sjx-vE5b1YoJpPUgm8Ub09ElE&callback=initMap">
+</script>
+
+<script>
+function iniciarMovimientoCarritoCamioncito() {
+  setInterval(() => {
+    actualizarUbicacionLavador();
+    obtenerUbicacionCliente();
+  }, 5000);
+}
+
+socket.on("iniciar_movimiento", (data) => {
+  console.log("📡 Movimiento recibido por el lavador:", data);
+  if (
+    data &&
+    data.cliente_id == clienteId &&
+    data.lavador_id == lavadorId
+  ) {
+    console.log("✅ IDs coinciden, iniciando movimiento...");
+    iniciarMovimientoCarritoCamioncito();
+  }
+});
+
+function obtenerUbicacionLavador() {
+  if (!map) {
+    console.warn("⚠️ Mapa aún no está listo.");
+    return;
+  }
+
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(pos => {
+      console.log("📍 Lavador detectado en:", pos.coords.latitude, pos.coords.longitude);
+
+      const posicionLavador = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+
+      if (!lavadorMarker) {
+        lavadorMarker = new google.maps.Marker({
+          position: posicionLavador,
+          map: map,
+          title: "Lavador",
+          icon: {
+            url: "/static/icons/camioncito_icono.png",
+            scaledSize: new google.maps.Size(50, 50)
+          }
+        });
+      } else {
+        lavadorMarker.setPosition(posicionLavador);
+      }
+
+      map.setCenter(posicionLavador);
+
+      // 🔵 Trazar línea si el cliente está presente
+      if (clienteMarker) {
+        if (rutaPolyline) rutaPolyline.setMap(null);
+        rutaPolyline = new google.maps.Polyline({
+          path: [lavadorMarker.getPosition(), clienteMarker.getPosition()],
+          geodesic: true,
+          strokeColor: "#00bfff",
+          strokeOpacity: 1.0,
+          strokeWeight: 3,
+          map: map
+        });
+      }
+
+      // Enviar ubicación al servidor si es necesario
+      actualizarUbicacion(pos.coords.latitude, pos.coords.longitude);
+
+    }, error => {
+      console.warn("❌ Error obteniendo ubicación del lavador:", error.message);
+    }, { enableHighAccuracy: true, timeout: 10000 });
+
+  } else {
+    console.warn("⚠️ El navegador no soporta geolocalización.");
+  }
+}
+
+let intervaloCliente = null;
+
+window.socket.on("nueva_solicitud", function(data) {
+  console.log("📨 Solicitud recibida del cliente:", data);
+
+  if (data.lavador_id == lavadorId) {
+    console.log("✅ Esta solicitud es para mí, me uno a mi sala privada");
+    // 🔄 Actualizar clienteId dinámicamente al recibir solicitud
+    document.getElementById("clienteData").dataset.id = data.cliente_id;
+    clienteId = data.cliente_id;
+    console.log("🔄 clienteId actualizado dinámicamente:", clienteId);
+        
+    joinSalaChatSiListo();
+    
+    window.socket.emit("unirse_sala_privada", {
+      lavador_id: lavadorId
+    });
+
+    const wrap = document.createElement('div');
+
+    const strong = document.createElement('strong');
+    strong.textContent = `${data.nombre} ${data.apellido}`;
+    wrap.appendChild(strong);
+    wrap.appendChild(document.createElement('br'));
+
+    wrap.appendChild(document.createTextNode(`Tel: ${data.telefono}`));
+    wrap.appendChild(document.createElement('br'));
+
+    const btn = document.createElement('button');
+    btn.id = `botonAceptar_${data.solicitud_id}`;
+    btn.className = 'aceptar';
+    btn.type = 'button';
+    btn.textContent = 'Aceptar';
+    btn.addEventListener('click', () => aceptar(data.solicitud_id));
+    wrap.appendChild(btn);
+
+    const cont = document.getElementById('solicitudes');
+    cont.innerHTML = '';
+    cont.appendChild(wrap);
+    document.getElementById('notificacion').style.display = 'block';
+    window.aceptar = aceptar; // para que onclick / listener encuentre la función
+
+    // ✅ Solo inicia si no está ya corriendo
+    if (!intervaloCliente) {
+      intervaloCliente = setInterval(() => {
+        if (clienteId !== "none") {
+          obtenerUbicacionCliente();
+        } else {
+          console.warn("⚠️ clienteId inválido:", clienteId);
+        }
+      }, 5000);
+    }
   }
 });
 
 </script>
 
-<!-- 🔧 INICIO CAMBIO: MAPA LAVADOR (restaurado) -->
-<script>
-  let map = null;
-  let lavadorMarker = null;
-  let clienteMarker = null;
-  let rutaPolyline = null;
-  let intervaloCliente = null;
-
-  function actualizarUbicacion(lat, lng) {
-    try {
-      socket.emit("ubicacion_lavador", { lavador_id: lavadorId, latitud: lat, longitud: lng });
-    } catch(e) {}
-
-    fetch(`/actualizar_ubicacion_lavador?lat=${lat}&lng=${lng}`, { credentials: 'include' })
-      .then(res => res.json())
-      .catch(() => {});
-
-    // Dibujar ruta si ya tenemos ambos marcadores
-    if (clienteMarker && lavadorMarker) {
-      if (rutaPolyline) rutaPolyline.setMap(null);
-      rutaPolyline = new google.maps.Polyline({
-        path: [lavadorMarker.getPosition(), clienteMarker.getPosition()],
-        geodesic: true,
-        strokeOpacity: 1.0,
-        strokeWeight: 3,
-        map: map
-      });
-    }
-  }
-
-  function obtenerUbicacionCliente() {
-    if (!clienteId || clienteId === 'none') return;
-
-    fetch(`/obtener_ubicacion_cliente?user_id=${clienteId}`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(data => {
-        if (!data || data.error) return;
-        if (data.lat && data.lng) {
-          const pos = { lat: data.lat, lng: data.lng };
-          if (!clienteMarker) {
-            clienteMarker = new google.maps.Marker({
-              position: pos,
-              map: map,
-              title: 'Cliente',
-              icon: { url: '/static/icons/carrito_icono.png', scaledSize: new google.maps.Size(50, 50) }
-            });
-          } else {
-            clienteMarker.setPosition(pos);
-          }
-
-          if (clienteMarker && lavadorMarker) {
-            if (rutaPolyline) rutaPolyline.setMap(null);
-            rutaPolyline = new google.maps.Polyline({
-              path: [lavadorMarker.getPosition(), clienteMarker.getPosition()],
-              geodesic: true,
-              strokeOpacity: 1.0,
-              strokeWeight: 3,
-              map: map
-            });
-          }
-        }
-      })
-      .catch(() => {});
-  }
-
-  function initMap() {
-    map = new google.maps.Map(document.getElementById('map'), {
-      center: { lat: 19.4326, lng: -99.1332 },
-      zoom: 15
-    });
-
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(pos => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        const myPos = { lat, lng };
-
-        lavadorMarker = new google.maps.Marker({
-          position: myPos,
-          map: map,
-          title: 'Tu ubicación',
-          icon: { url: '/static/icons/camioncito_icono.png', scaledSize: new google.maps.Size(50, 50) }
-        });
-
-        map.setCenter(myPos);
-        actualizarUbicacion(lat, lng);
-        obtenerUbicacionCliente();
-
-        // refrescar ubicación del lavador cada 5s
-        setInterval(() => {
-          navigator.geolocation.getCurrentPosition(p2 => {
-            const la = p2.coords.latitude;
-            const lo = p2.coords.longitude;
-            if (lavadorMarker) lavadorMarker.setPosition({ lat: la, lng: lo });
-            actualizarUbicacion(la, lo);
-          });
-        }, 5000);
-
-      }, () => {
-        // fallback
-        const fb = { lat: 18.4861, lng: -69.9312 };
-        lavadorMarker = new google.maps.Marker({
-          position: fb,
-          map: map,
-          title: 'Ubicación simulada',
-          icon: { url: '/static/icons/camioncito_icono.png', scaledSize: new google.maps.Size(50, 50) }
-        });
-        map.setCenter(fb);
-      }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
-    }
-
-    // refrescar posición del cliente cada 5s si hay cliente
-    if (!intervaloCliente) {
-      intervaloCliente = setInterval(() => {
-        if (clienteId && clienteId !== 'none') {
-          obtenerUbicacionCliente();
-        }
-      }, 5000);
-    }
-  }
-
-  window.initMap = initMap;
-</script>
-<script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBmVCNKb_sjx-vE5b1YoJpPUgm8Ub09ElE&callback=initMap"></script>
-<!-- 🔧 FIN CAMBIO: MAPA LAVADOR -->
-
 <script>
 function aceptar(id) { 
-  fetch(`/aceptar_solicitud?solicitud_id=${id}`)
-    .then(res => res.json())
-    .then(res => {
-      alert(res.message || res.error);
+  console.log("✅ click aceptar", id);
 
-      const botonAceptar = document.getElementById(`botonAceptar_${id}`);
-      if (botonAceptar) {
-        botonAceptar.style.display = "none";
+  fetch(`/aceptar_solicitud?solicitud_id=${id}`, {
+    method: "GET",
+    credentials: "include",   // 🔑 mantiene la sesión
+    cache: "no-store"
+  })
+  .then(res => res.ok ? res.json() : Promise.reject(res))
+  .then(res => {
+    alert(res.message || res.error);
+
+    // Oculta el botón de aceptar de esa tarjeta
+    const botonAceptar = document.getElementById(`botonAceptar_${id}`);
+    if (botonAceptar) botonAceptar.style.display = "none";
+
+    if (res.cliente_id) {
+      const hidden = document.getElementById("clienteIdHidden");
+      if (hidden) hidden.value = res.cliente_id;
+    }
+
+    clienteId = res.cliente_id;
+      joinSalaChatSiListo();
+
+    // Asegura unión a la sala privada tras aceptar
+    try {
+      if (window.socket && typeof window.socket.emit === "function") {
+        socket.emit("unirse_sala_privada", { lavador_id: LAVADOR_ID });
       }
+    } catch (e) { 
+      console.warn("⚠️ unión sala falló:", e); 
+    }
 
-      // 🔧 INICIO PARCHE: ocultar franja de nueva solicitud
-      const franja = document.getElementById("franjaSolicitud");
-      if (franja) {
-        franja.style.display = "none";
+    // Refresca burbuja chat
+    const boton = document.getElementById("botonChat");
+    if (boton) {
+      let b = document.getElementById("burbujaChat");
+      if (!b) {
+        b = document.createElement("span");
+        b.id = "burbujaChat";
+        b.textContent = "🔴";
+        b.style.marginLeft = "5px";
+        boton.appendChild(b);
       }
-      // 🔧 FIN PARCHE
+    }
 
-      iniciarMovimientoManual(id);  // Sigue normal
-
-      // 🔧 INICIO CAMBIO: persistir clienteId para volver del chat
-      try {
-        if (clienteId && clienteId !== "none") {
-          localStorage.setItem("clienteId_actual", String(clienteId));
-        }
-      } catch (e) {}
-      // 🔧 FIN CAMBIO
-      // ❌ location.reload(); → ELIMINADO
-    });
+    // 🚀 flujo normal
+    iniciarMovimientoManual(id);
+  })
+  .catch(err => console.error("✘ aceptar_solicitud:", err.status || err, err.statusText || ""));
 }
+
+// 👈 garantiza que onclick la encuentre
+window.aceptar = aceptar;
 
 function iniciarMovimientoManual(solicitudId) {
   fetch(`/obtener_ids_por_solicitud?solicitud_id=${solicitudId}`)
@@ -438,20 +588,25 @@ document.addEventListener('click', () => {
 }, { once: true });
 
 setInterval(() => {
-  fetch("/verificar_mensajes_nuevos")
-    .then(res => res.json())
-    .then(data => {
-      if (data.mensajes_nuevos && !document.getElementById("burbujaChat")) {
-        const burbuja = document.createElement("span");
-        burbuja.textContent = "🔴";
-        burbuja.id = "burbujaChat";
-        burbuja.style.marginLeft = "5px";
-        const boton = document.getElementById("botonChat");
-        if (boton) boton.appendChild(burbuja);
-      }
-    });
+  fetch("/verificar_mensajes_nuevos", {
+    method: "GET",
+    credentials: "include",   // 🔑 manda la cookie de sesión
+    cache: "no-store"         // evita respuestas cacheadas
+  })
+  .then(res => res.ok ? res.json() : Promise.reject(res))
+  .then(data => {
+    if (data.mensajes_nuevos && !document.getElementById("burbujaChat")) {
+      const burbuja = document.createElement("span");
+      burbuja.textContent = "🔴";
+      burbuja.id = "burbujaChat";
+      burbuja.style.marginLeft = "5px";
+      const boton = document.getElementById("botonChat");
+      if (boton) boton.appendChild(burbuja);
+    }
+  })
+  .catch(err => console.error("✘ verificar_mensajes_nuevos (lavador):", err.status || err, err.statusText || ""));
 }, 5000);
-    
+   
 socket.on("actualizar_ubicacion_cliente", (data) => {
   const posicionCliente = { lat: data.latitud, lng: data.longitud };
 
