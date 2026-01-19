@@ -96,7 +96,7 @@ def seleccionar_rol():
     if rol == 'cliente':
         return redirect(url_for('registro_cliente'))
     elif rol == 'lavador':
-        return redirect(url_for('registro_lavador'))
+        redirect('/registro_lavador')
 
 @app.route('/registro_cliente', methods=['GET', 'POST'])
 def registro_cliente():
@@ -140,11 +140,11 @@ def cliente_dashboard():
 @app.route('/lavador_bauche', methods=['GET'])
 def lavador_bauche():
     if 'lavador_id' not in session:
-        return redirect(url_for('registro_lavador'))
+        redirect('/registro_lavador')
 
     lavador = Usuario.query.get(session['lavador_id'])
     if not lavador:
-        return redirect(url_for('registro_lavador'))
+        redirect('/registro_lavador')
 
     # Si ya está aprobado, entra directo al dashboard
     if getattr(lavador, 'suscrito', False) and lavador.estado == 'activo':
@@ -156,7 +156,7 @@ def lavador_bauche():
 @app.route('/lavador_formulario', methods=['GET', 'POST'])
 def lavador_formulario():
     if 'lavador_id' not in session:
-        return redirect(url_for('registro_lavador'))
+        return redirect('/registro_lavador')
 
     lavador = Usuario.query.get(session['lavador_id'])
     if not lavador:
@@ -236,11 +236,11 @@ def aprobar_bauche():
 @app.route('/lavador_dashboard')
 def lavador_dashboard():
     if 'lavador_id' not in session:
-        return redirect(url_for('registro_lavador'))
+        redirect('/registro_lavador')
 
     lavador = Usuario.query.get(session['lavador_id'])
     if not lavador:
-        return redirect(url_for('registro_lavador'))
+        redirect('/registro_lavador')
 
     return render_template('lavador_dashboard.html', lavador=lavador)
 
