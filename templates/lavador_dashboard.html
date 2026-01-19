@@ -248,11 +248,26 @@
   // ====== Cuando el cliente cancela la solicitud ======
   window.socket.on("solicitud_cancelada", (data) => {
     try {
+
+      // ===== INICIO PARCHE: cancelación global (pendiente) SOLO limpia UI, NO rompe ruta =====
+      if (data && data.solo_ui) {
+        const notif = document.getElementById("notificacion");
+        if (notif) notif.style.display = "none";
+
+        const cont = document.getElementById("solicitudes");
+        if (cont) cont.innerHTML = "";
+
+        // OJO: NO tocamos clienteId, NO tocamos rutaPolyline, NO tocamos markers
+        return;
+      }
+      // ===== FIN PARCHE =====
+
       const cid = data && data.cliente_id ? String(data.cliente_id) : null;
       const actual = (clienteId && clienteId !== "none") ? String(clienteId) : null;
       const guardado = localStorage.getItem("lm_cliente_activo");
 
-      if (!cid || cid === actual || cid === String(guardado)) {
+      // ===== INICIO PARCHE: solo limpiar TODO si la cancelación corresponde a MI servicio actual =====
+      if (!cid || (actual && cid === actual) || (guardado && cid === String(guardado))) {
         const notif = document.getElementById("notificacion");
         if (notif) notif.style.display = "none";
 
@@ -272,6 +287,8 @@
         if (clienteMarker) { clienteMarker.setMap(null); clienteMarker = null; }
         yaUnidoChat = false;
       }
+      // ===== FIN PARCHE =====
+
     } catch(e) {}
   });
 

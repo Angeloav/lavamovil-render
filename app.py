@@ -727,35 +727,38 @@ def cancelar_solicitud():
     if not cliente_id:
         return jsonify({'message': 'No hay cliente en sesión'}), 401
 
+    # ===== INICIO PARCHE: cancelar SOLO pendientes (no romper servicios activos) =====
     solicitud = Solicitud.query.filter(
         Solicitud.cliente_id == cliente_id,
-        Solicitud.estado != 'finalizado'
-    ).first()
+        Solicitud.estado == 'pendiente'
+    ).order_by(Solicitud.id.desc()).first()
+    # ===== FIN PARCHE =====
 
     if not solicitud:
-        return jsonify({'message': 'No se encontró una solicitud activa para cancelar.'}), 404
+        return jsonify({'message': 'No se encontró una solicitud pendiente para cancelar.'}), 404
 
-    lavador_asignado_id = solicitud.lavador_id
+    lavador_asignado_id = solicitud.lavador_id  # normalmente None si es pendiente
     cliente = Usuario.query.get(solicitud.cliente_id)
 
     solicitud_id = solicitud.id
     db.session.delete(solicitud)
     db.session.commit()
 
-    # ✅ Avisar al lavador asignado (si existía)
+    # ✅ Avisar al lavador asignado (si existía) - por si acaso
     if lavador_asignado_id:
         socketio.emit('notificacion_lavador', {
             'titulo': 'Solicitud cancelada',
             'mensaje': f'El cliente {cliente.nombre} canceló la solicitud.'
         }, room=f'lavador_{lavador_asignado_id}')
 
-    # ✅ Avisar a TODOS los lavadores para que limpien su UI (franja/botón)
+    # ✅ Avisar a TODOS los lavadores SOLO para limpiar la franja (NO tocar ruta activa)
     lavadores = Usuario.query.filter_by(rol='lavador').all()
     for lav in lavadores:
         socketio.emit('solicitud_cancelada', {
             'solicitud_id': solicitud_id,
             'cliente_id': cliente_id,
-            'lavador_id': lavador_asignado_id
+            'lavador_id': lavador_asignado_id,
+            'solo_ui': True  # ===== INICIO PARCHE: bandera para frontend =====
         }, room=f'lavador_{lav.id}')
 
     return jsonify({'message': 'Solicitud cancelada correctamente.'})
