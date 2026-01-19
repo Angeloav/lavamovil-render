@@ -137,32 +137,21 @@ def cliente_dashboard():
 
     return render_template("cliente_dashboard.html", cliente=cliente, solicitud_activa=solicitud_activa)
 
-@app.route('/registro_lavador', methods=['GET', 'POST'])
-def registro_lavador():
-    if request.method == 'POST':
-        nombre = request.form['nombre']
-        apellido = request.form['apellido']
-        telefono = request.form['telefono'].strip()
+@app.route('/lavador_bauche', methods=['GET'])
+def lavador_bauche():
+    if 'lavador_id' not in session:
+        return redirect(url_for('registro_lavador'))
 
-        # ===== INICIO PARCHE: NO crear lavador duplicado por telefono =====
-        lavador_existente = Usuario.query.filter_by(rol='lavador', telefono=telefono).first()
-        if lavador_existente:
-            session['lavador_id'] = lavador_existente.id
-            session.permanent = True
-            print(f"✅ Reingreso lavador existente por telefono. ID: {lavador_existente.id}")
-            return redirect(url_for('lavador_formulario'))
-        # ===== FIN PARCHE =====
+    lavador = Usuario.query.get(session['lavador_id'])
+    if not lavador:
+        return redirect(url_for('registro_lavador'))
 
-        lavador = Usuario(rol='lavador', nombre=nombre, apellido=apellido, telefono=telefono)
-        db.session.add(lavador)
-        db.session.commit()
+    # Si ya está aprobado, entra directo al dashboard
+    if getattr(lavador, 'suscrito', False) and lavador.estado == 'activo':
+        return redirect(url_for('lavador_dashboard'))
 
-        session['lavador_id'] = lavador.id
-        session.permanent = True
-
-        return redirect(url_for('lavador_formulario'))
-
-    return render_template('registro_lavador.html')
+    # Reutilizamos tu HTML donde está el form de subir bauche
+    return render_template('lavador_pago.html', lavador=lavador)
 
 @app.route('/lavador_formulario', methods=['GET', 'POST'])
 def lavador_formulario():
@@ -173,17 +162,35 @@ def lavador_formulario():
     if not lavador:
         return 'Lavador no encontrado. Por favor regístrate de nuevo.'
 
-    # ===== INICIO PARCHE: si ya tiene suscripcion vigente, saltar pago =====
+    # ===== INICIO PARCHE: reingreso limpio (BAUCHE) =====
     ahora = datetime.utcnow()
-    if getattr(lavador, 'suscrito', False) and getattr(lavador, 'fecha_expiracion', None):
-        if lavador.fecha_expiracion >= ahora and lavador.estado == 'activo':
-            print(f"✅ Lavador con suscripcion vigente. ID {lavador.id} hasta {lavador.fecha_expiracion}")
-            return redirect(url_for('lavador_dashboard_v2')) # <-- asegúrate que esta ruta existe
+
+    # Si está aprobado y activo, entra directo (y repara fecha_expiracion si vino vacía)
+    if getattr(lavador, 'suscrito', False) and lavador.estado == 'activo':
+        if getattr(lavador, 'fecha_expiracion', None) is None:
+            lavador.fecha_expiracion = ahora + timedelta(days=30)
+            try:
+                lavador.fecha_aprobacion = ahora
+            except Exception:
+                pass
+            db.session.commit()
+            print(f"🧩 Reparada fecha_expiracion para lavador {lavador.id} => {lavador.fecha_expiracion}")
+
+        # Si expiró, lo mandamos a bauche otra vez
+        if lavador.fecha_expiracion and lavador.fecha_expiracion < ahora:
+            print(f"⛔ Suscripcion vencida lavador {lavador.id} => {lavador.fecha_expiracion}")
+            lavador.estado = 'inactivo'
+            lavador.suscrito = False
+            db.session.commit()
+            return redirect(url_for('lavador_bauche'))
+
+        print(f"✅ Lavador aprobado reingresando: {lavador.id} hasta {lavador.fecha_expiracion}")
+        return redirect(url_for('lavador_dashboard'))
     # ===== FIN PARCHE =====
 
-    # si ya completó formulario interno, manda a pago (como tú lo tienes)
+    # Si ya completó el formulario, debe ir a BAUCHE (no pago)
     if lavador.nombre and lavador.apellido and lavador.id_personal:
-        return redirect(url_for('lavador_pago'))
+        return redirect(url_for('lavador_bauche'))
 
     if request.method == 'POST':
         lavador.nombre = request.form['nombre']
@@ -193,7 +200,7 @@ def lavador_formulario():
         lavador.descripcion = request.form['descripcion']
         lavador.estado = 'inactivo'
         db.session.commit()
-        return redirect(url_for('lavador_pago'))
+        return redirect(url_for('lavador_bauche'))
 
     return render_template('lavador_formulario.html', lavador=lavador)
 
@@ -203,11 +210,14 @@ def aprobar_bauche():
     lavador = Usuario.query.get(lavador_id)
 
     if lavador:
+        ahora = datetime.utcnow()
+
         lavador.estado = 'activo'
         lavador.suscrito = True
 
         # ===== INICIO PARCHE: activar 30 dias desde aprobación =====
-        lavador.fecha_expiracion = datetime.utcnow() + timedelta(days=30)
+        lavador.fecha_aprobacion = ahora
+        lavador.fecha_expiracion = ahora + timedelta(days=30)
         # ===== FIN PARCHE =====
 
         db.session.commit()
@@ -223,21 +233,16 @@ def aprobar_bauche():
 
     return 'Lavador no encontrado', 404
 
-@app.route('/lavador_dashboard', endpoint='lavador_dashboard_v2')
-def lavador_dashboard_v2():
-    ...
-    lavador_id = session.get('lavador_id')
-    if not lavador_id:
+@app.route('/lavador_dashboard')
+def lavador_dashboard():
+    if 'lavador_id' not in session:
         return redirect(url_for('registro_lavador'))
 
-    lavador = db.session.get(Usuario, lavador_id)
+    lavador = Usuario.query.get(session['lavador_id'])
     if not lavador:
         return redirect(url_for('registro_lavador'))
 
-    solicitud_activa = Solicitud.query.filter_by(lavador_id=lavador.id, estado='aceptado').first()
-    cliente = Usuario.query.get(solicitud_activa.cliente_id) if solicitud_activa else None
-
-    return render_template("lavador_dashboard.html", lavador=lavador, cliente=cliente, solicitud_activa=solicitud_activa)
+    return render_template('lavador_dashboard.html', lavador=lavador)
 
 @app.route('/rechazar_bauche', methods=['POST'])
 def rechazar_bauche():
