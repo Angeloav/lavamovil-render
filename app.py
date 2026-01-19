@@ -96,7 +96,8 @@ def seleccionar_rol():
     if rol == 'cliente':
         return redirect(url_for('registro_cliente'))
     elif rol == 'lavador':
-        redirect('/registro_lavador')
+        return redirect(url_for('registro_lavador'))
+    return redirect(url_for('index'))
 
 @app.route('/registro_cliente', methods=['GET', 'POST'])
 def registro_cliente():
@@ -137,10 +138,43 @@ def cliente_dashboard():
 
     return render_template("cliente_dashboard.html", cliente=cliente, solicitud_activa=solicitud_activa)
 
+# ===== INICIO PARCHE: /registro_lavador (reingreso por telefono, sin duplicar) =====
+@app.route('/registro_lavador', methods=['GET', 'POST'])
+def registro_lavador():
+    if request.method == 'POST':
+        nombre = request.form.get('nombre', '').strip()
+        apellido = request.form.get('apellido', '').strip()
+        telefono = request.form.get('telefono', '').strip()
+
+        if not telefono:
+            return render_template('registro_lavador.html', error="Teléfono requerido")
+
+        # Reingreso por telefono (NO crea duplicado)
+        lavador_existente = Usuario.query.filter_by(rol='lavador', telefono=telefono).first()
+        if lavador_existente:
+            session['lavador_id'] = lavador_existente.id
+            session.permanent = True
+            print(f"✅ Reingreso lavador por telefono. ID: {lavador_existente.id}")
+            return redirect(url_for('lavador_formulario'))
+
+        # Crear nuevo lavador
+        lavador = Usuario(rol='lavador', nombre=nombre, apellido=apellido, telefono=telefono)
+        db.session.add(lavador)
+        db.session.commit()
+
+        session['lavador_id'] = lavador.id
+        session.permanent = True
+        print(f"✅ Nuevo lavador creado. ID: {lavador.id}")
+
+        return redirect(url_for('lavador_formulario'))
+
+    return render_template('registro_lavador.html')
+# ===== FIN PARCHE =====
+
 @app.route('/lavador_bauche', methods=['GET'])
 def lavador_bauche():
     if 'lavador_id' not in session:
-        redirect('/registro_lavador')
+        return redirect(url_for('registro_lavador'))
 
     lavador = Usuario.query.get(session['lavador_id'])
     if not lavador:
@@ -236,11 +270,11 @@ def aprobar_bauche():
 @app.route('/lavador_dashboard')
 def lavador_dashboard():
     if 'lavador_id' not in session:
-        redirect('/registro_lavador')
+        return redirect(url_for('registro_lavador'))
 
     lavador = Usuario.query.get(session['lavador_id'])
     if not lavador:
-        redirect('/registro_lavador')
+        return redirect(url_for('registro_lavador'))
 
     return render_template('lavador_dashboard.html', lavador=lavador)
 
@@ -694,7 +728,7 @@ def cancelar_solicitud():
 def terminos():
     return render_template('terminos.html')
 
-@app.route('/')
+@app.route('/splash')
 def splash():
     return render_template('splash.html')
 
@@ -1091,7 +1125,7 @@ def add_no_cache_headers(resp):
     resp.headers["Expires"] = "0"
     return resp
 
-APP_VERSION = "2025-08-06-02"  # <-- súbele 1 si vuelves a desplegar
+APP_VERSION = "2026-01-19-01"  # <-- súbele 1 si vuelves a desplegar
 
 @app.get("/__version")
 def version():
