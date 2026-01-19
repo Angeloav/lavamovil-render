@@ -278,6 +278,42 @@ def lavador_dashboard():
 
     return render_template('lavador_dashboard.html', lavador=lavador)
 
+@app.route('/subir_bauche', methods=['POST'])
+def subir_bauche():
+    if 'lavador_id' not in session:
+        return redirect(url_for('registro_lavador'))
+
+    lavador_id = session.get('lavador_id')
+    lavador = Usuario.query.get(lavador_id)
+
+    if not lavador:
+        return 'Lavador no encontrado. Por favor regístrate de nuevo.'
+
+    if 'bauche' not in request.files:
+        return 'No se envió ningún archivo.'
+
+    file = request.files['bauche']
+    if file.filename == '':
+        return 'No se seleccionó ningún archivo.'
+
+    filename = secure_filename(file.filename)
+    file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+
+    lavador.bauche = filename
+    lavador.estado = 'inactivo'
+    db.session.commit()
+
+    session['lavador_id'] = lavador.id
+    session.permanent = True
+
+    print(f"✅ Bauche subido por {lavador.nombre} (ID: {lavador.id})")
+
+    return render_template(
+        'lavador_pago.html',
+        mensaje='Comprobante subido correctamente. Espera aprobación del administrador.',
+        lavador=lavador
+    )
+
 @app.route('/rechazar_bauche', methods=['POST'])
 def rechazar_bauche():
     lavador_id = request.form['lavador_id']
