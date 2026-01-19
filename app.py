@@ -178,7 +178,7 @@ def lavador_formulario():
     if getattr(lavador, 'suscrito', False) and getattr(lavador, 'fecha_expiracion', None):
         if lavador.fecha_expiracion >= ahora and lavador.estado == 'activo':
             print(f"✅ Lavador con suscripcion vigente. ID {lavador.id} hasta {lavador.fecha_expiracion}")
-            return redirect(url_for('lavador_dashboard'))  # <-- asegúrate que esta ruta existe
+            return redirect(url_for('lavador_dashboard_v2')) # <-- asegúrate que esta ruta existe
     # ===== FIN PARCHE =====
 
     # si ya completó formulario interno, manda a pago (como tú lo tienes)
@@ -223,15 +223,9 @@ def aprobar_bauche():
 
     return 'Lavador no encontrado', 404
 
-@app.route('/lavador_dashboard')
-def lavador_dashboard():
-    if 'lavador_id' not in session:
-        return redirect(url_for('registro_lavador'))
-
-    return render_template('lavador_dashboard.html')
-
-@app.route('/lavador_dashboard')
-def lavador_dashboard():
+@app.route('/lavador_dashboard', endpoint='lavador_dashboard_v2')
+def lavador_dashboard_v2():
+    ...
     lavador_id = session.get('lavador_id')
     if not lavador_id:
         return redirect(url_for('registro_lavador'))
