@@ -22,11 +22,24 @@ app.config['UPLOAD_FOLDER'] = 'static/bauches'
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['SESSION_FILE_DIR'] = os.path.join(os.getcwd(), 'flask_session')
 
+# ✅ Sesión persistente (para que no se pierda al cerrarse por memoria)
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = True  # Render usa https
+
 # 🔧 INICIO PARCHE — ORDEN CORRECTO
 db = SQLAlchemy(app)
 Session(app)
 socketio = SocketIO(app, async_mode="eventlet", cors_allowed_origins="*", logger=True, engineio_logger=True)
 # 🔧 FIN PARCHE
+
+@app.before_request
+def mantener_sesion_viva():
+    # Si hay cliente o lavador logueado, hacemos la cookie persistente
+    if session.get("cliente_id") or session.get("lavador_id"):
+        session.permanent = True
+        session.modified = True
 
 # Modelos
 class Usuario(db.Model):
@@ -98,6 +111,7 @@ def registro_cliente():
         
         session['usuario_id'] = cliente.id  # 🔑 Necesaria para la mayoría de rutas
         session['cliente_id'] = cliente.id  # 🔑 Necesaria para cliente_dashboard
+        session.permanent = True
 
         return redirect(url_for('cliente_dashboard'))
 
@@ -135,6 +149,7 @@ def registro_lavador():
         db.session.commit()
 
         session['lavador_id'] = lavador.id  # Guarda lo correcto
+        session.permanent = True
 
         return redirect(url_for('lavador_formulario'))
 
